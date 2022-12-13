@@ -75,7 +75,7 @@ sqlite3 *mbtiles_open(char *dbname, char **argv, int forcetable) {
 	}
 
 	// "tiles" is a view that retrieves content from "images"
-	if (sqlite3_exec(outdb, "CREATE VIEW tiles AS SELECT tiles_shallow.zoom_level as  zoom_level, tiles_shallow.tile_column as tile_column, iles_shallow.tile_row as tile_row, tiles_data.tile_data as tile_data FROM tiles_shallow JOIN tiles_data on tiles_shallow.tile_data_id = tiles_data.tile_data_id", NULL, NULL, &err) != SQLITE_OK) {
+	if (sqlite3_exec(outdb, "CREATE VIEW tiles AS SELECT tiles_shallow.zoom_level as  zoom_level, tiles_shallow.tile_column as tile_column, tiles_shallow.tile_row as tile_row, tiles_data.tile_data as tile_data FROM tiles_shallow JOIN tiles_data on tiles_shallow.tile_data_id = tiles_data.tile_data_id", NULL, NULL, &err) != SQLITE_OK) {
 		fprintf(stderr, "%s: create images table: %s\n", argv[0], err);
 		if (!forcetable) {
 			exit(EXIT_EXISTS);
