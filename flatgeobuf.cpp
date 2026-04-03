@@ -7,6 +7,7 @@
 #include "milo/dtoa_milo.h"
 #include "main.hpp"
 #include "errors.hpp"
+#include "thread.hpp"
 
 static constexpr uint8_t magicbytes[8] = { 0x66, 0x67, 0x62, 0x03, 0x66, 0x67, 0x62, 0x01 };
 
@@ -75,13 +76,13 @@ drawvec readGeometry(const FlatGeobuf::Geometry *geometry, FlatGeobuf::GeometryT
 
 	if (geometry_type == FlatGeobuf::GeometryType_Point) {
 		return readPoints(geometry);
-	} if (geometry_type == FlatGeobuf::GeometryType_MultiPoint) {
+	} else if (geometry_type == FlatGeobuf::GeometryType_MultiPoint) {
 		return readPoints(geometry);	
-	} if (geometry_type == FlatGeobuf::GeometryType_LineString) {
+	} else if (geometry_type == FlatGeobuf::GeometryType_LineString) {
 		return readLinePart(geometry);
-	} else if (h_geometry_type == FlatGeobuf::GeometryType_MultiLineString) {
+	} else if (geometry_type == FlatGeobuf::GeometryType_MultiLineString) {
 		return readLinePart(geometry);
-	} if (geometry_type == FlatGeobuf::GeometryType_Polygon) {
+	} else if (geometry_type == FlatGeobuf::GeometryType_Polygon) {
 		return readLinePart(geometry);
 	} else if (geometry_type == FlatGeobuf::GeometryType_MultiPolygon) {
 	// if it is a GeometryCollection, parse Parts, ignore XY
@@ -131,7 +132,6 @@ void readFeature(const FlatGeobuf::Feature *feature, long long feature_sequence_
 	serial_feature sf;
 
 	sf.layer = layer;
-	sf.layername = layername;
 	sf.segment = sst->segment;
 	if (feature_sequence_id >= 0) {
 		sf.has_id = true;
@@ -139,19 +139,20 @@ void readFeature(const FlatGeobuf::Feature *feature, long long feature_sequence_
 		sf.has_id = false;
 	}
 	sf.id = feature_sequence_id;
-	sf.has_tippecanoe_minzoom = false;
-	sf.has_tippecanoe_maxzoom = false;
+	sf.tippecanoe_minzoom = -1;
+	sf.tippecanoe_maxzoom = -1;
 	sf.feature_minzoom = false;
 	sf.seq = (*sst->layer_seq);
 	sf.geometry = dv;
 	sf.t = drawvec_type;
 
-	std::vector<std::string> full_keys;
+	std::vector<std::shared_ptr<std::string>> full_keys;
 	std::vector<serial_val> full_values;
+    key_pool key_pool;
 
 	// assume tabular schema with columns in header
 	size_t p_pos = 0;
-	while (p_pos < feature->properties()->size()) {
+	while (feature->properties() && p_pos < feature->properties()->size()) {
 		uint16_t col_idx;
 		memcpy(&col_idx, feature->properties()->data() + p_pos, sizeof(col_idx));
 
@@ -177,7 +178,11 @@ void readFeature(const FlatGeobuf::Feature *feature, long long feature_sequence_
 			sv.type = mvt_bool;
 			uint8_t bool_val;
 			memcpy(&bool_val, feature->properties()->data() + p_pos + sizeof(uint16_t), sizeof(bool_val));
-			sv.s = std::to_string(bool_val);
+			if (bool_val) {
+				sv.s = "true";
+			} else {
+				sv.s = "false";
+			}
 			p_pos += sizeof(uint16_t) + sizeof(bool_val);
 		} else if (col_type == FlatGeobuf::ColumnType_Short) {
 			sv.type = mvt_sint;
@@ -239,14 +244,14 @@ void readFeature(const FlatGeobuf::Feature *feature, long long feature_sequence_
 			fprintf(stderr, "flatgeobuf has unsupported column type %u\n", (unsigned int)col_type);
 			exit(EXIT_IMPOSSIBLE);
 		}
-		full_keys.push_back(h_column_names[col_idx]);
+		full_keys.push_back(key_pool.pool(h_column_names[col_idx]));
 		full_values.push_back(sv);
 	}
 
 	sf.full_keys = full_keys;
 	sf.full_values = full_values;
 
-	serialize_feature(sst, sf);
+	serialize_feature(sst, sf, layername);
 }
 
 struct fgb_queued_feature {
@@ -303,7 +308,7 @@ void fgbRunQueue() {
 	}
 
 	for (size_t i = 0; i < CPUS; i++) {
-		if (pthread_create(&pthreads[i], NULL, fgb_run_parse_feature, &qra[i]) != 0) {
+		if (thread_create(&pthreads[i], NULL, fgb_run_parse_feature, &qra[i]) != 0) {
 			perror("pthread_create");
 			exit(EXIT_PTHREAD);
 		}
@@ -368,7 +373,7 @@ void parse_flatgeobuf(std::vector<struct serialization_state> *sst, const char *
 	auto h_geometry_type = header->geometry_type();
 
 	long long feature_sequence_id = -1;
-	int index_size = 0;
+	long long index_size = 0;
 	if (node_size > 0) {
 		if (!quiet) {
 			fprintf(stderr, "detected indexed FlatGeobuf: assigning feature IDs by sequence\n");

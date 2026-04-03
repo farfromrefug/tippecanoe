@@ -7,6 +7,8 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sqlite3.h>
+#include <cmath>
+#include <climits>
 #include <vector>
 #include <string>
 #include <set>
@@ -124,6 +126,7 @@ void mbtiles_write_tile(sqlite3 *outdb, int z, int tx, int ty, const char *data,
 	// 	h = h * 31 + data[i];
 	// }
 	// std::string hash = std::to_string(h);
+	std::string hash = std::to_string(fnv1a(std::string(data, size)));
 
 	// following https://github.com/mapbox/node-mbtiles/blob/master/lib/mbtiles.js
 
@@ -203,21 +206,21 @@ void mbtiles_erase_zoom(sqlite3 *outdb, int z) {
 	}
 }
 
-bool type_and_string::operator<(const type_and_string &o) const {
-	if (string < o.string) {
+bool serial_val::operator<(const serial_val &o) const {
+	if (s < o.s) {
 		return true;
 	}
-	if (string == o.string && type < o.type) {
+	if (s == o.s && type < o.type) {
 		return true;
 	}
 	return false;
 }
 
-bool type_and_string::operator!=(const type_and_string &o) const {
+bool serial_val::operator!=(const serial_val &o) const {
 	if (type != o.type) {
 		return true;
 	}
-	if (string != o.string) {
+	if (s != o.s) {
 		return true;
 	}
 	return false;
@@ -229,14 +232,17 @@ void tilestats(std::map<std::string, layermap_entry> const &layermap1, size_t el
 	lmv.push_back(layermap1);
 	std::map<std::string, layermap_entry> layermap = merge_layermaps(lmv, true);
 
+	state.nospace = true;
 	state.json_write_hash();
 
 	state.nospace = true;
 	state.json_write_string("layerCount");
+	state.nospace = true;
 	state.json_write_unsigned(layermap.size());
 
 	state.nospace = true;
 	state.json_write_string("layers");
+	state.nospace = true;
 	state.json_write_array();
 
 	for (auto layer : layermap) {
@@ -245,10 +251,12 @@ void tilestats(std::map<std::string, layermap_entry> const &layermap1, size_t el
 
 		state.nospace = true;
 		state.json_write_string("layer");
+		state.nospace = true;
 		state.json_write_string(layer.first);
 
 		state.nospace = true;
 		state.json_write_string("count");
+		state.nospace = true;
 		state.json_write_unsigned(layer.second.points + layer.second.lines + layer.second.polygons);
 
 		std::string geomtype = "Polygon";
@@ -260,15 +268,17 @@ void tilestats(std::map<std::string, layermap_entry> const &layermap1, size_t el
 
 		state.nospace = true;
 		state.json_write_string("geometry");
+		state.nospace = true;
 		state.json_write_string(geomtype);
 
-		size_t attrib_count = layer.second.file_keys.size();
+		size_t attrib_count = layer.second.tilestats.size();
 		if (attrib_count > max_tilestats_attributes) {
 			attrib_count = max_tilestats_attributes;
 		}
 
 		state.nospace = true;
 		state.json_write_string("attributeCount");
+		state.nospace = true;
 		state.json_write_unsigned(attrib_count);
 
 		state.nospace = true;
@@ -277,7 +287,7 @@ void tilestats(std::map<std::string, layermap_entry> const &layermap1, size_t el
 		state.json_write_array();
 
 		size_t attrs = 0;
-		for (auto attribute : layer.second.file_keys) {
+		for (auto attribute : layer.second.tilestats) {
 			if (attrs == elements) {
 				break;
 			}
@@ -288,6 +298,7 @@ void tilestats(std::map<std::string, layermap_entry> const &layermap1, size_t el
 
 			state.nospace = true;
 			state.json_write_string("attribute");
+			state.nospace = true;
 			state.json_write_string(attribute.first);
 
 			size_t val_count = attribute.second.sample_values.size();
@@ -297,6 +308,7 @@ void tilestats(std::map<std::string, layermap_entry> const &layermap1, size_t el
 
 			state.nospace = true;
 			state.json_write_string("count");
+			state.nospace = true;
 			state.json_write_unsigned(val_count);
 
 			int type = 0;
@@ -318,10 +330,12 @@ void tilestats(std::map<std::string, layermap_entry> const &layermap1, size_t el
 
 			state.nospace = true;
 			state.json_write_string("type");
+			state.nospace = true;
 			state.json_write_string(type_str);
 
 			state.nospace = true;
 			state.json_write_string("values");
+			state.nospace = true;
 			state.json_write_array();
 
 			size_t vals = 0;
@@ -330,19 +344,19 @@ void tilestats(std::map<std::string, layermap_entry> const &layermap1, size_t el
 					break;
 				}
 
-				state.nospace = true;
-
 				if (value.type == mvt_double || value.type == mvt_bool) {
 					vals++;
 
-					state.json_write_stringified(value.string);
+					state.nospace = true;
+					state.json_write_stringified(value.s);
 				} else {
-					std::string trunc = truncate16(value.string, 256);
+					std::string trunc = truncate16(value.s, 256);
 
-					if (trunc.size() == value.string.size()) {
+					if (trunc.size() == value.s.size()) {
 						vals++;
 
-						state.json_write_string(value.string);
+						state.nospace = true;
+						state.json_write_string(value.s);
 					}
 				}
 			}
@@ -353,10 +367,12 @@ void tilestats(std::map<std::string, layermap_entry> const &layermap1, size_t el
 			if ((type & (1 << mvt_double)) != 0) {
 				state.nospace = true;
 				state.json_write_string("min");
+				state.nospace = true;
 				state.json_write_number(attribute.second.min);
 
 				state.nospace = true;
 				state.json_write_string("max");
+				state.nospace = true;
 				state.json_write_number(attribute.second.max);
 			}
 
@@ -381,60 +397,88 @@ std::string stringify_strategies(std::vector<strategy> const &strategies) {
 	json_writer state(&out);
 	bool any = false;
 
+	state.nospace = true;
 	state.json_write_array();
 	for (size_t i = 0; i < strategies.size(); i++) {
+		state.nospace = true;
 		state.json_write_hash();
 
 		if (strategies[i].dropped_by_rate > 0) {
+			state.nospace = true;
 			state.json_write_string("dropped_by_rate");
+			state.nospace = true;
 			state.json_write_number(strategies[i].dropped_by_rate);
 			any = true;
 		}
 
 		if (strategies[i].dropped_by_gamma > 0) {
+			state.nospace = true;
 			state.json_write_string("dropped_by_gamma");
+			state.nospace = true;
 			state.json_write_number(strategies[i].dropped_by_gamma);
 			any = true;
 		}
 
 		if (strategies[i].dropped_as_needed > 0) {
+			state.nospace = true;
 			state.json_write_string("dropped_as_needed");
+			state.nospace = true;
 			state.json_write_number(strategies[i].dropped_as_needed);
 			any = true;
 		}
 
 		if (strategies[i].coalesced_as_needed > 0) {
+			state.nospace = true;
 			state.json_write_string("coalesced_as_needed");
+			state.nospace = true;
 			state.json_write_number(strategies[i].coalesced_as_needed);
 			any = true;
 		}
 
 		if (strategies[i].detail_reduced > 0) {
+			state.nospace = true;
 			state.json_write_string("detail_reduced");
+			state.nospace = true;
 			state.json_write_number(strategies[i].detail_reduced);
 			any = true;
 		}
 
 		if (strategies[i].tiny_polygons > 0) {
+			state.nospace = true;
 			state.json_write_string("tiny_polygons");
+			state.nospace = true;
 			state.json_write_number(strategies[i].tiny_polygons);
 			any = true;
 		}
 
 		if (strategies[i].tile_size > 0) {
+			state.nospace = true;
 			state.json_write_string("tile_size_desired");
+			state.nospace = true;
 			state.json_write_number(strategies[i].tile_size);
 			any = true;
 		}
 
 		if (strategies[i].feature_count > 0) {
+			state.nospace = true;
 			state.json_write_string("feature_count_desired");
+			state.nospace = true;
 			state.json_write_number(strategies[i].feature_count);
 			any = true;
 		}
 
+		if (strategies[i].truncated_zooms > 0) {
+			state.nospace = true;
+			state.json_write_string("truncated_zooms");
+			state.nospace = true;
+			state.json_write_number(strategies[i].truncated_zooms);
+			any = true;
+		}
+
+		state.nospace = true;
 		state.json_end_hash();
 	}
+	state.nospace = true;
 	state.json_end_array();
 
 	if (any) {
@@ -444,22 +488,10 @@ std::string stringify_strategies(std::vector<strategy> const &strategies) {
 	}
 }
 
-void mbtiles_write_metadata(sqlite3 *outdb, const char *outdir, const char *fname, int minzoom, int maxzoom, double minlat, double minlon, double maxlat, double maxlon, double midlat, double midlon, int forcetable, const char *attribution, std::map<std::string, layermap_entry> const &layermap, bool vector, const char *description, bool do_tilestats, std::map<std::string, std::string> const &attribute_descriptions, std::string const &program, std::string const &commandline, std::vector<strategy> const &strategies) {
+void mbtiles_write_metadata(sqlite3 *db, const metadata &m, bool forcetable) {
 	char *sql, *err;
 
-	sqlite3 *db = outdb;
-	if (outdb == NULL) {
-		if (sqlite3_open("", &db) != SQLITE_OK) {
-			fprintf(stderr, "Temporary db: %s\n", sqlite3_errmsg(db));
-			exit(EXIT_OPEN);
-		}
-		if (sqlite3_exec(db, "CREATE TABLE metadata (name text, value text);", NULL, NULL, &err) != SQLITE_OK) {
-			fprintf(stderr, "Create metadata table: %s\n", err);
-			exit(EXIT_SQLITE);
-		}
-	}
-
-	sql = sqlite3_mprintf("INSERT INTO metadata (name, value) VALUES ('name', %Q);", fname);
+	sql = sqlite3_mprintf("INSERT INTO metadata (name, value) VALUES ('name', %Q);", m.name.c_str());
 	if (sqlite3_exec(db, sql, NULL, NULL, &err) != SQLITE_OK) {
 		fprintf(stderr, "set name in metadata: %s\n", err);
 		if (!forcetable) {
@@ -468,7 +500,7 @@ void mbtiles_write_metadata(sqlite3 *outdb, const char *outdir, const char *fnam
 	}
 	sqlite3_free(sql);
 
-	sql = sqlite3_mprintf("INSERT INTO metadata (name, value) VALUES ('description', %Q);", description != NULL ? description : fname);
+	sql = sqlite3_mprintf("INSERT INTO metadata (name, value) VALUES ('description', %Q);", m.description.c_str());
 	if (sqlite3_exec(db, sql, NULL, NULL, &err) != SQLITE_OK) {
 		fprintf(stderr, "set description in metadata: %s\n", err);
 		if (!forcetable) {
@@ -477,7 +509,7 @@ void mbtiles_write_metadata(sqlite3 *outdb, const char *outdir, const char *fnam
 	}
 	sqlite3_free(sql);
 
-	sql = sqlite3_mprintf("INSERT INTO metadata (name, value) VALUES ('version', %d);", 2);
+	sql = sqlite3_mprintf("INSERT INTO metadata (name, value) VALUES ('version', %d);", m.version);
 	if (sqlite3_exec(db, sql, NULL, NULL, &err) != SQLITE_OK) {
 		fprintf(stderr, "set version : %s\n", err);
 		if (!forcetable) {
@@ -486,7 +518,7 @@ void mbtiles_write_metadata(sqlite3 *outdb, const char *outdir, const char *fnam
 	}
 	sqlite3_free(sql);
 
-	sql = sqlite3_mprintf("INSERT INTO metadata (name, value) VALUES ('minzoom', %d);", minzoom);
+	sql = sqlite3_mprintf("INSERT INTO metadata (name, value) VALUES ('minzoom', %d);", m.minzoom);
 	if (sqlite3_exec(db, sql, NULL, NULL, &err) != SQLITE_OK) {
 		fprintf(stderr, "set minzoom: %s\n", err);
 		if (!forcetable) {
@@ -495,7 +527,7 @@ void mbtiles_write_metadata(sqlite3 *outdb, const char *outdir, const char *fnam
 	}
 	sqlite3_free(sql);
 
-	sql = sqlite3_mprintf("INSERT INTO metadata (name, value) VALUES ('maxzoom', %d);", maxzoom);
+	sql = sqlite3_mprintf("INSERT INTO metadata (name, value) VALUES ('maxzoom', %d);", m.maxzoom);
 	if (sqlite3_exec(db, sql, NULL, NULL, &err) != SQLITE_OK) {
 		fprintf(stderr, "set maxzoom: %s\n", err);
 		if (!forcetable) {
@@ -504,7 +536,7 @@ void mbtiles_write_metadata(sqlite3 *outdb, const char *outdir, const char *fnam
 	}
 	sqlite3_free(sql);
 
-	sql = sqlite3_mprintf("INSERT INTO metadata (name, value) VALUES ('center', '%f,%f,%d');", midlon, midlat, maxzoom);
+	sql = sqlite3_mprintf("INSERT INTO metadata (name, value) VALUES ('center', '%f,%f,%d');", m.center_lon, m.center_lat, m.center_z);
 	if (sqlite3_exec(db, sql, NULL, NULL, &err) != SQLITE_OK) {
 		fprintf(stderr, "set center: %s\n", err);
 		if (!forcetable) {
@@ -513,7 +545,7 @@ void mbtiles_write_metadata(sqlite3 *outdb, const char *outdir, const char *fnam
 	}
 	sqlite3_free(sql);
 
-	sql = sqlite3_mprintf("INSERT INTO metadata (name, value) VALUES ('bounds', '%f,%f,%f,%f');", minlon, minlat, maxlon, maxlat);
+	sql = sqlite3_mprintf("INSERT INTO metadata (name, value) VALUES ('bounds', '%f,%f,%f,%f');", m.minlon, m.minlat, m.maxlon, m.maxlat);
 	if (sqlite3_exec(db, sql, NULL, NULL, &err) != SQLITE_OK) {
 		fprintf(stderr, "set bounds: %s\n", err);
 		if (!forcetable) {
@@ -522,7 +554,16 @@ void mbtiles_write_metadata(sqlite3 *outdb, const char *outdir, const char *fnam
 	}
 	sqlite3_free(sql);
 
-	sql = sqlite3_mprintf("INSERT INTO metadata (name, value) VALUES ('type', %Q);", "overlay");
+	sql = sqlite3_mprintf("INSERT INTO metadata (name, value) VALUES ('antimeridian_adjusted_bounds', '%f,%f,%f,%f');", m.minlon2, m.minlat2, m.maxlon2, m.maxlat2);
+	if (sqlite3_exec(db, sql, NULL, NULL, &err) != SQLITE_OK) {
+		fprintf(stderr, "set bounds: %s\n", err);
+		if (!forcetable) {
+			exit(EXIT_SQLITE);
+		}
+	}
+	sqlite3_free(sql);
+
+	sql = sqlite3_mprintf("INSERT INTO metadata (name, value) VALUES ('type', %Q);", m.type.c_str());
 	if (sqlite3_exec(db, sql, NULL, NULL, &err) != SQLITE_OK) {
 		fprintf(stderr, "set type: %s\n", err);
 		if (!forcetable) {
@@ -531,10 +572,10 @@ void mbtiles_write_metadata(sqlite3 *outdb, const char *outdir, const char *fnam
 	}
 	sqlite3_free(sql);
 
-	if (attribution != NULL) {
-		sql = sqlite3_mprintf("INSERT INTO metadata (name, value) VALUES ('attribution', %Q);", attribution);
+	if (m.attribution.size() > 0) {
+		sql = sqlite3_mprintf("INSERT INTO metadata (name, value) VALUES ('attribution', %Q);", m.attribution.c_str());
 		if (sqlite3_exec(db, sql, NULL, NULL, &err) != SQLITE_OK) {
-			fprintf(stderr, "set type: %s\n", err);
+			fprintf(stderr, "set attribution: %s\n", err);
 			if (!forcetable) {
 				exit(EXIT_SQLITE);
 			}
@@ -542,7 +583,7 @@ void mbtiles_write_metadata(sqlite3 *outdb, const char *outdir, const char *fnam
 		sqlite3_free(sql);
 	}
 
-	sql = sqlite3_mprintf("INSERT INTO metadata (name, value) VALUES ('format', %Q);", vector ? "pbf" : "png");
+	sql = sqlite3_mprintf("INSERT INTO metadata (name, value) VALUES ('format', %Q);", m.format.c_str());
 	if (sqlite3_exec(db, sql, NULL, NULL, &err) != SQLITE_OK) {
 		fprintf(stderr, "set format: %s\n", err);
 		if (!forcetable) {
@@ -551,17 +592,16 @@ void mbtiles_write_metadata(sqlite3 *outdb, const char *outdir, const char *fnam
 	}
 	sqlite3_free(sql);
 
-	std::string version = program + " " + VERSION;
-	sql = sqlite3_mprintf("INSERT INTO metadata (name, value) VALUES ('generator', %Q);", version.c_str());
+	sql = sqlite3_mprintf("INSERT INTO metadata (name, value) VALUES ('generator', %Q);", m.generator.c_str());
 	if (sqlite3_exec(db, sql, NULL, NULL, &err) != SQLITE_OK) {
-		fprintf(stderr, "set version: %s\n", err);
+		fprintf(stderr, "set generator: %s\n", err);
 		if (!forcetable) {
 			exit(EXIT_SQLITE);
 		}
 	}
 	sqlite3_free(sql);
 
-	sql = sqlite3_mprintf("INSERT INTO metadata (name, value) VALUES ('generator_options', %Q);", commandline.c_str());
+	sql = sqlite3_mprintf("INSERT INTO metadata (name, value) VALUES ('generator_options', %Q);", m.generator_options.c_str());
 	if (sqlite3_exec(db, sql, NULL, NULL, &err) != SQLITE_OK) {
 		fprintf(stderr, "set commandline: %s\n", err);
 		if (!forcetable) {
@@ -570,9 +610,8 @@ void mbtiles_write_metadata(sqlite3 *outdb, const char *outdir, const char *fnam
 	}
 	sqlite3_free(sql);
 
-	std::string strat = stringify_strategies(strategies);
-	if (strat.size() > 0) {
-		sql = sqlite3_mprintf("INSERT INTO metadata (name, value) VALUES ('strategies', %Q);", strat.c_str());
+	if (m.strategies_json.size() > 0) {
+		sql = sqlite3_mprintf("INSERT INTO metadata (name, value) VALUES ('strategies', %Q);", m.strategies_json.c_str());
 		if (sqlite3_exec(db, sql, NULL, NULL, &err) != SQLITE_OK) {
 			fprintf(stderr, "set strategies: %s\n", err);
 			if (!forcetable) {
@@ -582,17 +621,124 @@ void mbtiles_write_metadata(sqlite3 *outdb, const char *outdir, const char *fnam
 		sqlite3_free(sql);
 	}
 
-	if (vector) {
-		size_t elements = max_tilestats_values;
-		std::string buf;
+	if (m.decisions_json.size() > 0) {
+		sql = sqlite3_mprintf("INSERT INTO metadata (name, value) VALUES ('tippecanoe_decisions', %Q);", m.decisions_json.c_str());
+		if (sqlite3_exec(db, sql, NULL, NULL, &err) != SQLITE_OK) {
+			fprintf(stderr, "set decisions: %s\n", err);
+			if (!forcetable) {
+				exit(EXIT_SQLITE);
+			}
+		}
+		sqlite3_free(sql);
+	}
 
-		{
-			json_writer state(&buf);
+	if (m.vector_layers_json.size() > 0 || m.tilestats_json.size() > 0) {
+		std::string json;
+		json_writer state(&json);
+		state.nospace = true;
+		state.json_write_hash();
 
-			state.json_write_hash();
+		if (m.vector_layers_json.size() > 0) {
 			state.nospace = true;
-
 			state.json_write_string("vector_layers");
+			state.nospace = true;
+			state.json_write_json(m.vector_layers_json);
+
+			if (m.tilestats_json.size() > 0) {
+				state.nospace = true;
+				state.json_write_string("tilestats");
+				state.nospace = true;
+				state.json_write_json(m.tilestats_json);
+			}
+		} else {
+			if (m.tilestats_json.size() > 0) {
+				state.nospace = true;
+				state.json_write_string("tilestats");
+				state.nospace = true;
+				state.json_write_json(m.tilestats_json);
+			}
+		}
+
+		state.nospace = true;
+		state.json_end_hash();
+
+		sql = sqlite3_mprintf("INSERT INTO metadata (name, value) VALUES ('json', %Q);", json.c_str());
+		if (sqlite3_exec(db, sql, NULL, NULL, &err) != SQLITE_OK) {
+			fprintf(stderr, "set json: %s\n", err);
+			if (!forcetable) {
+				exit(EXIT_SQLITE);
+			}
+		}
+		sqlite3_free(sql);
+	}
+}
+
+static double sixdig(double val) {
+	return std::round(val * 1e6) / 1e6;
+}
+
+#define str(x) #x
+#define xstr(x) str(x)
+std::string version_str() {
+	std::string s = VERSION;
+	std::string build_info = xstr(BUILD_INFO);
+	if (build_info.size() > 0) {
+		s += " " + build_info;
+	}
+	return s;
+}
+
+metadata make_metadata(const char *fname, int minzoom, int maxzoom, double minlat, double minlon, double maxlat, double maxlon, double minlat2, double minlon2, double maxlat2, double maxlon2, double midlat, double midlon, const char *attribution, std::map<std::string, layermap_entry> const &layermap, bool vector, const char *description, bool do_tilestats, std::map<std::string, std::string> const &attribute_descriptions, std::string const &program, std::string const &commandline, std::vector<strategy> const &strategies, int basezoom, double droprate, int retain_points_multiplier) {
+	metadata m;
+
+	m.name = fname;
+	m.description = description != NULL ? description : fname;
+	m.version = 2;
+	m.type = "overlay";
+	m.format = vector ? "pbf" : "png";
+
+	m.minzoom = minzoom;
+	m.maxzoom = maxzoom;
+
+	m.minlat = sixdig(minlat);
+	m.minlon = sixdig(minlon);
+	m.maxlat = sixdig(maxlat);
+	m.maxlon = sixdig(maxlon);
+
+	m.minlat2 = sixdig(minlat2);
+	m.minlon2 = sixdig(minlon2);
+	m.maxlat2 = sixdig(maxlat2);
+	m.maxlon2 = sixdig(maxlon2);
+
+	m.center_lat = sixdig(midlat);
+	m.center_lon = sixdig(midlon);
+	m.center_z = maxzoom;
+
+	if (attribution != NULL) {
+		m.attribution = attribution;
+	}
+
+	m.generator = program + " " + version_str();
+	m.generator_options = commandline;
+
+	m.strategies_json = stringify_strategies(strategies);
+
+	if (std::isinf(droprate)) {
+		droprate = LLONG_MAX;
+	}
+	if (basezoom != maxzoom || droprate != 2.5 || retain_points_multiplier != 1) {
+		m.decisions_json = std::string("{") +
+				   "\"basezoom\":" + milo::dtoa_milo(basezoom) + "," +
+				   "\"droprate\":" + milo::dtoa_milo(droprate) + "," +
+				   "\"retain_points_multiplier\":" + std::to_string(retain_points_multiplier) +
+				   std::string("}");
+	}
+
+	if (vector) {
+		{
+			json_writer state(&m.vector_layers_json);
+
+			state.nospace = true;
 			state.json_write_array();
 
 			std::vector<std::string> lnames;
@@ -601,32 +747,43 @@ void mbtiles_write_metadata(sqlite3 *outdb, const char *outdir, const char *fnam
 			}
 
 			for (size_t i = 0; i < lnames.size(); i++) {
-				auto fk = layermap.find(lnames[i]);
+				auto ts = layermap.find(lnames[i]);
+				state.nospace = true;
 				state.json_write_hash();
 
+				state.nospace = true;
 				state.json_write_string("id");
+				state.nospace = true;
 				state.json_write_string(lnames[i]);
 
-				state.json_write_string("description");
-				state.json_write_string(fk->second.description);
-
-				state.json_write_string("minzoom");
-				state.json_write_signed(fk->second.minzoom);
-
-				state.json_write_string("maxzoom");
-				state.json_write_signed(fk->second.maxzoom);
-
-				state.json_write_string("fields");
-				state.json_write_hash();
 				state.nospace = true;
+				state.json_write_string("description");
+				state.nospace = true;
+				state.json_write_string(ts->second.description);
+
+				state.nospace = true;
+				state.json_write_string("minzoom");
+				state.nospace = true;
+				state.json_write_signed(ts->second.minzoom);
+
+				state.nospace = true;
+				state.json_write_string("maxzoom");
+				state.nospace = true;
+				state.json_write_signed(ts->second.maxzoom);
+
+				state.nospace = true;
+				state.json_write_string("fields");
+				state.nospace = true;
+				state.json_write_hash();
 
 				bool first = true;
 				size_t attribute_count = 0;
-				for (auto j = fk->second.file_keys.begin(); j != fk->second.file_keys.end(); ++j) {
+				for (auto j = ts->second.tilestats.begin(); j != ts->second.tilestats.end(); ++j) {
 					if (first) {
 						first = false;
 					}
 
+					state.nospace = true;
 					state.json_write_string(j->first);
 
 					auto f = attribute_descriptions.find(j->first);
@@ -637,15 +794,20 @@ void mbtiles_write_metadata(sqlite3 *outdb, const char *outdir, const char *fnam
 						}
 
 						if (type == (1 << mvt_double)) {
+							state.nospace = true;
 							state.json_write_string("Number");
 						} else if (type == (1 << mvt_bool)) {
+							state.nospace = true;
 							state.json_write_string("Boolean");
 						} else if (type == (1 << mvt_string)) {
+							state.nospace = true;
 							state.json_write_string("String");
 						} else {
+							state.nospace = true;
 							state.json_write_string("Mixed");
 						}
 					} else {
+						state.nospace = true;
 						state.json_write_string(f->second);
 					}
 
@@ -657,81 +819,25 @@ void mbtiles_write_metadata(sqlite3 *outdb, const char *outdir, const char *fnam
 
 				state.nospace = true;
 				state.json_end_hash();
+				state.nospace = true;
 				state.json_end_hash();
 			}
 
+			state.nospace = true;
 			state.json_end_array();
+		}
+
+		{
+			size_t elements = max_tilestats_values;
+			json_writer state(&m.tilestats_json);
 
 			if (do_tilestats && elements > 0) {
-				state.nospace = true;
-				state.json_write_string("tilestats");
 				tilestats(layermap, elements, state);
 			}
-
-			state.nospace = true;
-			state.json_end_hash();
-		}
-
-		sql = sqlite3_mprintf("INSERT INTO metadata (name, value) VALUES ('json', %Q);", buf.c_str());
-		if (sqlite3_exec(db, sql, NULL, NULL, &err) != SQLITE_OK) {
-			fprintf(stderr, "set json: %s\n", err);
-			if (!forcetable) {
-				exit(EXIT_SQLITE);
-			}
-		}
-		sqlite3_free(sql);
-	}
-
-	if (outdir != NULL) {
-		std::string metadata = std::string(outdir) + "/metadata.json";
-
-		struct stat st;
-		if (stat(metadata.c_str(), &st) == 0) {
-			// Leave existing metadata in place with --allow-existing
-		} else {
-			FILE *fp = fopen(metadata.c_str(), "w");
-			if (fp == NULL) {
-				perror(metadata.c_str());
-				exit(EXIT_OPEN);
-			}
-
-			json_writer state(fp);
-
-			state.json_write_hash();
-			state.json_write_newline();
-
-			sqlite3_stmt *stmt;
-			if (sqlite3_prepare_v2(db, "SELECT name, value from metadata;", -1, &stmt, NULL) == SQLITE_OK) {
-				while (sqlite3_step(stmt) == SQLITE_ROW) {
-					std::string key, value;
-
-					const char *k = (const char *) sqlite3_column_text(stmt, 0);
-					const char *v = (const char *) sqlite3_column_text(stmt, 1);
-					if (k == NULL || v == NULL) {
-						fprintf(stderr, "Corrupt mbtiles file: null metadata\n");
-						exit(EXIT_SQLITE);
-					}
-
-					state.json_comma_newline();
-					state.json_write_string(k);
-					state.json_write_string(v);
-				}
-				sqlite3_finalize(stmt);
-			}
-
-			state.json_write_newline();
-			state.json_end_hash();
-			state.json_write_newline();
-			fclose(fp);
 		}
 	}
 
-	if (outdb == NULL) {
-		if (sqlite3_close(db) != SQLITE_OK) {
-			fprintf(stderr, "Could not close temp database: %s\n", sqlite3_errmsg(db));
-			exit(EXIT_CLOSE);
-		}
-	}
+	return m;
 }
 
 void mbtiles_close(sqlite3 *outdb, const char *pgm) {
@@ -779,35 +885,35 @@ std::map<std::string, layermap_entry> merge_layermaps(std::vector<std::map<std::
 				exit(EXIT_IMPOSSIBLE);
 			}
 
-			for (auto fk = map->second.file_keys.begin(); fk != map->second.file_keys.end(); ++fk) {
-				std::string attribname = fk->first;
+			for (auto ts = map->second.tilestats.begin(); ts != map->second.tilestats.end(); ++ts) {
+				std::string attribname = ts->first;
 				if (trunc) {
 					attribname = truncate16(attribname, 256);
 				}
 
-				auto fk2 = out_entry->second.file_keys.find(attribname);
+				auto ts2 = out_entry->second.tilestats.find(attribname);
 
-				if (fk2 == out_entry->second.file_keys.end()) {
-					out_entry->second.file_keys.insert(std::pair<std::string, type_and_string_stats>(attribname, fk->second));
+				if (ts2 == out_entry->second.tilestats.end()) {
+					out_entry->second.tilestats.insert(std::pair<std::string, tilestat>(attribname, ts->second));
 				} else {
-					for (auto val : fk->second.sample_values) {
-						auto pt = std::lower_bound(fk2->second.sample_values.begin(), fk2->second.sample_values.end(), val);
-						if (pt == fk2->second.sample_values.end() || *pt != val) {  // not found
-							fk2->second.sample_values.insert(pt, val);
+					for (auto val : ts->second.sample_values) {
+						auto pt = std::lower_bound(ts2->second.sample_values.begin(), ts2->second.sample_values.end(), val);
+						if (pt == ts2->second.sample_values.end() || *pt != val) {  // not found
+							ts2->second.sample_values.insert(pt, val);
 
-							if (fk2->second.sample_values.size() > max_tilestats_sample_values) {
-								fk2->second.sample_values.pop_back();
+							if (ts2->second.sample_values.size() > max_tilestats_sample_values) {
+								ts2->second.sample_values.pop_back();
 							}
 						}
 					}
 
-					fk2->second.type |= fk->second.type;
+					ts2->second.type |= ts->second.type;
 
-					if (fk->second.min < fk2->second.min) {
-						fk2->second.min = fk->second.min;
+					if (ts->second.min < ts2->second.min) {
+						ts2->second.min = ts->second.min;
 					}
-					if (fk->second.max > fk2->second.max) {
-						fk2->second.max = fk->second.max;
+					if (ts->second.max > ts2->second.max) {
+						ts2->second.max = ts->second.max;
 					}
 				}
 			}
@@ -828,41 +934,48 @@ std::map<std::string, layermap_entry> merge_layermaps(std::vector<std::map<std::
 	return out;
 }
 
-void add_to_file_keys(std::map<std::string, type_and_string_stats> &file_keys, std::string const &attrib, type_and_string const &val) {
+void add_to_tilestats(std::map<std::string, tilestat> &tilestats, std::string const &attrib, serial_val const &val) {
 	if (val.type == mvt_null) {
 		return;
 	}
 
-	auto fka = file_keys.find(attrib);
-	if (fka == file_keys.end()) {
-		file_keys.insert(std::pair<std::string, type_and_string_stats>(attrib, type_and_string_stats()));
-		fka = file_keys.find(attrib);
+	auto tsa = tilestats.find(attrib);
+	if (tsa == tilestats.end()) {
+		tilestats.insert(std::pair<std::string, tilestat>(attrib, tilestat()));
+		tsa = tilestats.find(attrib);
 	}
 
-	if (fka == file_keys.end()) {
+	if (tsa == tilestats.end()) {
 		fprintf(stderr, "Can't happen (tilestats)\n");
 		exit(EXIT_IMPOSSIBLE);
 	}
 
 	if (val.type == mvt_double) {
-		double d = atof(val.string.c_str());
+		double d = atof(val.s.c_str());
 
-		if (d < fka->second.min) {
-			fka->second.min = d;
+		if (d < tsa->second.min) {
+			tsa->second.min = d;
 		}
-		if (d > fka->second.max) {
-			fka->second.max = d;
-		}
-	}
-
-	auto pt = std::lower_bound(fka->second.sample_values.begin(), fka->second.sample_values.end(), val);
-	if (pt == fka->second.sample_values.end() || *pt != val) {  // not found
-		fka->second.sample_values.insert(pt, val);
-
-		if (fka->second.sample_values.size() > max_tilestats_sample_values) {
-			fka->second.sample_values.pop_back();
+		if (d > tsa->second.max) {
+			tsa->second.max = d;
 		}
 	}
 
-	fka->second.type |= (1 << val.type);
+	auto pt = std::lower_bound(tsa->second.sample_values.begin(), tsa->second.sample_values.end(), val);
+	if (pt == tsa->second.sample_values.end() || *pt != val) {  // not found
+		if (tsa->second.sample_values.size() >= max_tilestats_sample_values) {
+			if (pt == tsa->second.sample_values.end()) {
+				// insertion point would be at the end,
+				// and the list is already full, so do nothing
+			} else {
+				// bump the former last value, insert this one
+				tsa->second.sample_values.insert(pt, val);
+				tsa->second.sample_values.pop_back();
+			}
+		} else {
+			tsa->second.sample_values.insert(pt, val);
+		}
+	}
+
+	tsa->second.type |= (1 << val.type);
 }

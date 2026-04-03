@@ -1,3 +1,399 @@
+# 2.80.0
+
+* Remove undocumented command-line options
+
+# 2.79.0
+
+* When deduplicating features by ID in tippecanoe-overzoom, be careful
+  to track even features that have been clipped away.
+
+# 2.78.0
+
+* Fix potential infinite loops in as-needed dropping and coalescing.
+  When the threshold cannot be increased, it is now an error, rather than
+  falling back to trying to lower the detail.
+* Cleaning of complex polygon geometries now happens in stages
+  to avoid performance problems when there are very large numbers
+  of vertices.
+* Label point generation happens earlier in tiling, to avoid doing slow
+  operations on polygons that will not be retained anyway.
+
+# 2.77.0
+
+* Add --deduplicate-by-id option to tippecanoe-overzoom
+
+# 2.76.0
+
+* Add missing case for accumulating the mean of attributes that are inconsistently present
+* Add --keep-point-cluster-position (#326)
+
+# 2.75.1
+
+* Further reduce memory consumption in attribute sorting and tilestats tracking
+
+# 2.75.0
+
+* Reduce memory consumption in attribute accumulation and feature sorting
+
+# 2.74.0
+
+* Add the option to join attributes from a sqlite database in tile-join
+* Improve tile-join's tileset bounding box calculations
+
+# 2.73.0
+
+* Correctly clip features down to nothing when the clip region doesn't intersect the tile at all
+
+# 2.72.0
+
+* Add --clip-polygon-file and --feature-filter-file options to tippecanoe-overzoom
+
+# 2.71.0
+
+* Add --clip-bounding-box and --clip-polygon options to tippecanoe-overzoom
+
+# 2.70.1
+
+* Raise tippecanoe-decode limit on the size of individual tiles
+
+# 2.70.0
+
+* Performance improvements to tippecanoe-overzoom with attribute exclusion
+
+# 2.69.0
+
+* Fix crash when the first bin gets clipped away
+
+# 2.68.0
+
+* Adds `--no-tile-compression` option to `tippecanoe-overzoom`
+* Make `tippecanoe-overzoom` clip the output tile to the tile buffer after assigning points to bins
+* Adds `--include`/`-y` option to `tippecanoe-decode` to decode only specified attributes
+* Cleans up some inconsistent handling of variable tile extents in overzooming code
+* Speeds up overzooming slightly in `tile-join` by doing less preflighting to discover which child tiles contain features
+
+# 2.67.0
+
+* Reduce memory consumption of duplicate attribute names in `serial_feature`
+* The maxzoom guess calculation now takes into account the number of duplicate feature locations
+
+# 2.66.0
+
+* Only bin by ID, not by geometry, if --bin-by-id-list is specified
+* Do attribute accumulation in overzoom in mvt_value instead of converting to serial_val
+* Fix bool values read from flatgeobuf sources (#289)
+
+# 2.65.0
+
+* Improve spatial distribution of --retain-points-multiplier features
+* Add --preserve-multiplier-density-threshold option to maintain minimum density of multiplier features
+
+# 2.64.0
+
+* Add --bin-by-id to overzoom
+
+# 2.63.0
+
+* Top-level null filter now evaluates to true
+
+# 2.62.6
+
+* Remove buggy optimization to avoid reclipping in tippecanoe-overzoom
+
+# 2.62.5
+
+* More aggressive binning when points fail the point-in-polygon test
+
+# 2.62.4
+
+* Fix accumulation of count and mean in overzoom
+
+# 2.62.3
+
+* Summary statistics with --accumulate-numeric-attributes make it from tiling through to binning
+* Prefix can be specified for --accumulate-numeric-attributes
+* Added --exclude and --exclude-prefix to tippecanoe-overzoom
+
+# 2.62.2
+
+* Pass feature ID through with bins
+
+# 2.62.1
+
+* More work in progress on binning point features in overzoom
+
+# 2.62.0
+
+* Fix another bad interaction, this time between dropping-as-needed and --limit-tile-feature-count
+
+# 2.61.0
+
+* Added --calculate-feature-index option
+* Added "count" accumulation type to --accumulate-attribute
+* Work in progress on binning of point features in overzoom. Not ready for use yet.
+
+# 2.60.0
+
+* Fix bad interaction between --retain-points-multiplier and stopping early when the tile feature limit is reached
+* Fix another bad interaction between --retain-points-multiplier, dropping-as-needed, and variable depth tile pyramids
+* Add optional BUILD_INFO string to version
+* Reorder overzoom logic to clip before dealing with multiplier and filters
+* When --generate-variable-depth-tile-pyramid is in use, report the actual highest zoom generated as tileset maxzoom
+
+# 2.59.0
+
+* Correct `antimeridian_adjusted_bounds` latitude calculation when vertices extend beyond the edge of the Mercator plane
+
+# 2.58.0
+
+* Add --generate-variable-depth-tile-pyramid option
+* Add --line-simplification and --tiny-polygon-size options to tippecanoe-overzoom
+* Adjust tile feature limit for --retain-points-multiplier
+* Tune convergence rate for --coalesce-densest and --drop-densest
+* Fix overreported drop and coalesce counts in strategies
+
+# 2.57.0
+
+* Add multi-tile input to tippecanoe-overzoom
+
+# 2.56.0
+
+* Rework --coalesce-densest-as-needed and --drop-densest-as-needed to look better
+* Add --maximum-string-attribute-length option
+
+# 2.55.0
+
+* Fix hash collisions in the string pool
+
+# 2.53.0
+
+* Stop trying to add features to the tile after the feature limit is reached
+
+# 2.52.0
+
+* Fix accidental loss (at all zooms) of features that specify an explicit minzoom
+
+# 2.51.0
+
+* Fix null behavior in "in" expressions
+* But they are back to not using unidecode
+
+# 2.50.0
+
+* FSL-style "in" expressions use unidecode again
+
+# 2.49.0
+
+* FSL-style "in" expressions now allow numeric comparisons, but they no longer use unidecode to remove diacritics.
+
+# 2.48.0
+
+* Fix some undefined behavior bugs, one of which results in slight changes to line simplification choices
+
+# 2.47.0
+
+* Stabilize feature order in tippecanoe-overzoom when --preserve-feature-order is specified but the sequence attribute is not present
+
+# 2.46.0
+
+* Polygon dust returns to having the attributes of the contributing feature nearest the placeholder instead of the contributing feature with the largest area.
+
+# 2.45.0
+
+* Adjust tile size limit with --retain-points-multiplier dynamically within each tile, to allow multiplier features at high zooms if other features are being dropped as-needed
+
+# 2.44.0
+
+* Add --unidecode-data option to allow case-insensitive filter comparisons of transliterated strings
+
+# 2.43.0
+
+* Change -fraction-as-needed feature dropping to be consistent across tiles and zoom levels, and to follow the same pattern as point dropping by zoom level
+* With -as-needed feature dropping, drop or retain entire multiplier clusters instead of individual features
+* Sort the features within each multiplier cluster by its retention priority, for more consistency between zoom levels in filtered feature choice
+
+# 2.42.0
+
+* Improve tiling speed
+* Generate tilestats for the --retain-points-multiplier attributes
+
+# 2.41.3
+
+* Performance optimizations to tile reading, writing, and overzooming
+* Automatically vary the tile size limit by zoom level to match the intended retain-points-multiplier multiplication
+* Fix decompression error when bailing out because a tile can't be made small enough
+* Search harder for a feature size threshold to make the tile small enough before giving up
+
+# 2.41.2
+
+* Add --accumulate-attribute to tippecanoe-overzoom
+* Go back to ordering features within each multiplier cluster spatially, not in the order specified for tile feature order
+
+# 2.41.1
+
+* Make --preserve-input-order, --order-by, --order-descending-by, --order-smallest-first, and --order-largest-first cooperate with --retain-points-multiplier. The clusters will be ordered by their lead feature in the specified sequence. The other features in each cluster will continue to be physically near the lead feature, but ordered as specified within the cluster.
+
+# 2.41.0
+
+* Add Felt-style expression support for -j feature filters
+* Add --retain-points-multiplier option
+* Add tippecanoe_decisions metadata field to record basezoom, drop rate, and multiplier
+* Add multiplier thinning (-m) and feature filters (-j) to tippecanoe-overzoom
+
+# 2.40.0
+
+* Slightly reduce compression aggressiveness to improve as-needed dropping speed
+
+# 2.39.0
+
+* Reduce memory usage during tiling
+
+# 2.38.0
+
+* Tolerate polygon rings with insuffiently many points in input
+
+# 2.37.1
+
+* Reduce maximum memory used for vertex sorting
+
+# 2.37.0
+
+* Speed up tile-join overzooming and make it use less memory, by not including empty child tiles in the enumeration
+
+# 2.36.0
+
+* Make tile-join distrust the source tilesets' metadata maxzoom and minzoom
+* Add a special case in --detect-longitude-wraparound not to wrap around jumps of exactly 360°
+
+# 2.35.0
+
+* Fix a bug in --detect-longitude-wraparound when there are multiple rings
+
+# 2.34.1
+
+* Further improvements to tile-join speed
+
+# 2.34.0
+
+* Improve speed of overzooming in tile-join
+
+# 2.33.0
+
+* Further reduce memory usage of --no-simplification-of-shared-nodes by calculating the list of shared nodes globally using temporary files rather than in memory for each individual tile
+* Make --no-simplification-of-shared-nodes behave for LineStrings as it does for Polygons, preventing simplification only at crossings, convergences, and divergences, not at every point along collinear segments
+
+# 2.32.1
+
+* Reduce memory usage of --no-simplification-of-shared-nodes for polygons
+
+# 2.32.0
+
+* Extend --no-simplification-of-shared-nodes to also simplify shared polygon borders consistently
+
+# 2.31.0
+
+* Fix tile-join crash when trying to join empty tilesets
+* Add --no-tiny-polygon-reduction-at-maximum-zoom option
+
+# 2.30.1
+
+* Fix spurious reports of tiny polygons and 0-length LineStrings in "strategies"
+
+# 2.30.0
+
+* Add --extend-zooms-if-still-dropping-maximum option
+* Add --overzoom option to tile-join
+
+# 2.29.0
+
+* Add tippecanoe-overzoom tool
+
+# 2.28.1
+
+* Allow --set-attribute to override an existing attribute value
+
+# 2.28.0
+
+* Add --preserve-point-density-threshold option to reduce blank areas of the map at low zooms
+* Fix tile-join bug where use of --read-from would also accidentally enable --quiet
+
+# 2.27.0
+
+* Do more of line simplification in integer coordinates, to make behavior consistent across platforms
+* Reduce excessive logging during pmtiles conversion
+* Add --set-attribute option
+* Accept JSON form of --accumulate-attribute
+
+# 2.26.1
+
+* Avoid crashing if there is a polygon ring with only one point
+
+# 2.26.0
+
+* Fix bugs in --no-simplification-of-shared-nodes
+* Updated dockerfile (jtmiclat)
+* Set build options to use C++-17 (james2432)
+* Use std::fpclassify instead of plain fpclassify (james)
+* Fix pmtiles warnings (bdon)
+
+# 2.25.0
+
+* Add `--include`/`-y` option to tile-join
+
+# 2.24.0
+
+* Add --cluster-maxzoom option to limit zoom levels that receive clustering
+* Add `point_count_abbreviated` attribute to clustered features, for consistency with supercluster
+* Makefile changes to support FreeBSD
+* Add -r option to tile-join to provide a file containing a list of input files
+* Add antimeridian_adjusted_bounds field to tileset metadata
+
+## 2.23.0
+
+* Remove the concept of "separate metadata." Features now always directly reference their keys and values rather than going through a second level of indirection.
+* Limit the size of the string pool to 1/5 the size of memory, to prevent thrashing during feature ingestion.
+* Avoid using writeable memory maps. Instead, explicitly copy data in and out of memory.
+* Compress streams of features in the temporary files, to reduce disk usage and I/O latency
+
+## 2.22.0
+
+* Speed up feature dropping by removing unnecessary search for other small features
+
+## 2.21.0
+
+* Improve label placement to avoid placing labels in polygon holes
+
+## 2.20.0
+
+* Round coordinates instead of truncating them, for better precision when overzooming
+
+## 2.19.0
+
+* Don't guess an excessively large maxzoom when there is only one feature
+* Set the base zoom for -Bg as part of the --smallest-maximum-zoom-guess logic
+
+## 2.18.0
+
+* Fix crash when using tile-join to join an empty pmtiles tileset
+
+## 2.17.0
+
+* Add pmtiles output format
+
+## 2.16.0
+
+* During tiling, limit the size of the statistics that are kept for -as-needed calculations, because they can get quite large for sources with hundreds of millions of features.
+
+## 2.15.2
+
+* Change tile hash function to fnv1a
+* Report JSON object context on the same line as the error message
+
+## 2.15.1
+
+* Correct mbtiles inserts to use text instead of blob
+* Add an internal data structure to represent tileset metadata
+
 ## 2.15.0
 
 * Generate label points in a more straightforward checkerboard, and fewer of them at high zoom levels.

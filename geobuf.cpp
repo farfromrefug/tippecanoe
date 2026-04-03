@@ -15,6 +15,7 @@
 #include "jsonpull/jsonpull.h"
 #include "text.hpp"
 #include "errors.hpp"
+#include "thread.hpp"
 
 #define POINT 0
 #define MULTIPOINT 1
@@ -269,14 +270,14 @@ std::vector<drawvec_type> readGeometry(protozero::pbf_reader &pbf, size_t dim, d
 	return ret;
 }
 
-void readFeature(protozero::pbf_reader &pbf, size_t dim, double e, std::vector<std::string> &keys, struct serialization_state *sst, int layer, std::string layername) {
+void readFeature(protozero::pbf_reader &pbf, size_t dim, double e, std::vector<std::string> &keys, struct serialization_state *sst, int layer, std::string layername, key_pool &key_pool) {
 	std::vector<drawvec_type> dv;
 	long long id = 0;
 	bool has_id = false;
 	std::vector<serial_val> values;
 	std::map<std::string, serial_val> other;
 
-	std::vector<std::string> full_keys;
+	std::vector<std::shared_ptr<std::string>> full_keys;
 	std::vector<serial_val> full_values;
 
 	while (pbf.next()) {
@@ -337,7 +338,7 @@ void readFeature(protozero::pbf_reader &pbf, size_t dim, double e, std::vector<s
 					exit(EXIT_IMPOSSIBLE);
 				}
 
-				full_keys.push_back(keys[properties[i]]);
+				full_keys.push_back(key_pool.pool(keys[properties[i]]));
 				full_values.push_back(values[properties[i + 1]]);
 			}
 
@@ -379,12 +380,11 @@ void readFeature(protozero::pbf_reader &pbf, size_t dim, double e, std::vector<s
 		serial_feature sf;
 
 		sf.layer = layer;
-		sf.layername = layername;
 		sf.segment = sst->segment;
 		sf.has_id = has_id;
 		sf.id = id;
-		sf.has_tippecanoe_minzoom = false;
-		sf.has_tippecanoe_maxzoom = false;
+		sf.tippecanoe_minzoom = -1;
+		sf.tippecanoe_maxzoom = -1;
 		sf.feature_minzoom = false;
 		sf.seq = *(sst->layer_seq);
 		sf.geometry = dv[i].dv;
@@ -400,19 +400,17 @@ void readFeature(protozero::pbf_reader &pbf, size_t dim, double e, std::vector<s
 			if (o != NULL) {
 				json_object *min = json_hash_get(o, "minzoom");
 				if (min != NULL && (min->type == JSON_NUMBER)) {
-					sf.has_tippecanoe_minzoom = true;
 					sf.tippecanoe_minzoom = integer_zoom(sst->fname, milo::dtoa_milo(min->value.number.number));
 				}
 
 				json_object *max = json_hash_get(o, "maxzoom");
 				if (max != NULL && (max->type == JSON_NUMBER)) {
-					sf.has_tippecanoe_maxzoom = true;
 					sf.tippecanoe_maxzoom = integer_zoom(sst->fname, milo::dtoa_milo(max->value.number.number));
 				}
 
 				json_object *tlayer = json_hash_get(o, "layer");
 				if (tlayer != NULL && (tlayer->type == JSON_STRING)) {
-					sf.layername = tlayer->value.string.string;
+					layername = tlayer->value.string.string;
 				}
 			}
 
@@ -420,7 +418,7 @@ void readFeature(protozero::pbf_reader &pbf, size_t dim, double e, std::vector<s
 			json_end(jp);
 		}
 
-		serialize_feature(sst, sf);
+		serialize_feature(sst, sf, layername);
 	}
 }
 
@@ -436,10 +434,11 @@ struct queue_run_arg {
 
 void *run_parse_feature(void *v) {
 	struct queue_run_arg *qra = (struct queue_run_arg *) v;
+	key_pool key_pool;
 
 	for (size_t i = qra->start; i < qra->end; i++) {
 		struct queued_feature &qf = feature_queue[i];
-		readFeature(qf.pbf, qf.dim, qf.e, *qf.keys, &(*qf.sst)[qra->segment], qf.layer, qf.layername);
+		readFeature(qf.pbf, qf.dim, qf.e, *qf.keys, &(*qf.sst)[qra->segment], qf.layer, qf.layername, key_pool);
 	}
 
 	return NULL;
@@ -465,7 +464,7 @@ void runQueue() {
 	}
 
 	for (size_t i = 0; i < CPUS; i++) {
-		if (pthread_create(&pthreads[i], NULL, run_parse_feature, &qra[i]) != 0) {
+		if (thread_create(&pthreads[i], NULL, run_parse_feature, &qra[i]) != 0) {
 			perror("pthread_create");
 			exit(EXIT_PTHREAD);
 		}
@@ -506,17 +505,16 @@ void outBareGeometry(drawvec const &dv, int type, struct serialization_state *ss
 	serial_feature sf;
 
 	sf.layer = layer;
-	sf.layername = layername;
 	sf.segment = sst->segment;
 	sf.has_id = false;
-	sf.has_tippecanoe_minzoom = false;
-	sf.has_tippecanoe_maxzoom = false;
+	sf.tippecanoe_minzoom = -1;
+	sf.tippecanoe_maxzoom = -1;
 	sf.feature_minzoom = false;
 	sf.seq = (*sst->layer_seq);
 	sf.geometry = dv;
 	sf.t = type;
 
-	serialize_feature(sst, sf);
+	serialize_feature(sst, sf, layername);
 }
 
 void readFeatureCollection(protozero::pbf_reader &pbf, size_t dim, double e, std::vector<std::string> &keys, std::vector<struct serialization_state> *sst, int layer, std::string layername) {

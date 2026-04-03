@@ -2,6 +2,7 @@
 #include <string.h>
 #include <stdlib.h>
 #include <math.h>
+#include <cmath>
 #include <atomic>
 #include "projection.hpp"
 #include "errors.hpp"
@@ -21,8 +22,8 @@ struct projection *projection = &projections[0];
 void lonlat2tile(double lon, double lat, int zoom, long long *x, long long *y) {
 	// Place infinite and NaN coordinates off the edge of the Mercator plane
 
-	int lat_class = fpclassify(lat);
-	int lon_class = fpclassify(lon);
+	int lat_class = std::fpclassify(lat);
+	int lon_class = std::fpclassify(lon);
 	bool bad_lon = false;
 
 	if (lat_class == FP_INFINITE || lat_class == FP_NAN) {
@@ -56,8 +57,8 @@ void lonlat2tile(double lon, double lat, int zoom, long long *x, long long *y) {
 	double lat_rad = lat * M_PI / 180;
 	unsigned long long n = 1LL << zoom;
 
-	long long llx = n * ((lon + 180) / 360);
-	long long lly = n * (1 - (log(tan(lat_rad) + 1 / cos(lat_rad)) / M_PI)) / 2;
+	long long llx = std::round(n * ((lon + 180) / 360));
+	long long lly = std::round(n * (1 - (log(tan(lat_rad) + 1 / cos(lat_rad)) / M_PI)) / 2);
 
 	*x = llx;
 	*y = lly;
@@ -73,8 +74,8 @@ void tile2lonlat(long long x, long long y, int zoom, double *lon, double *lat) {
 void epsg3857totile(double ix, double iy, int zoom, long long *x, long long *y) {
 	// Place infinite and NaN coordinates off the edge of the Mercator plane
 
-	int iy_class = fpclassify(iy);
-	int ix_class = fpclassify(ix);
+	int iy_class = std::fpclassify(iy);
+	int ix_class = std::fpclassify(ix);
 
 	if (iy_class == FP_INFINITE || iy_class == FP_NAN) {
 		iy = 40000000.0;
@@ -83,12 +84,12 @@ void epsg3857totile(double ix, double iy, int zoom, long long *x, long long *y) 
 		ix = 40000000.0;
 	}
 
-	*x = ix * (1LL << 31) / 6378137.0 / M_PI + (1LL << 31);
-	*y = ((1LL << 32) - 1) - (iy * (1LL << 31) / 6378137.0 / M_PI + (1LL << 31));
+	*x = std::round(ix * (1LL << 31) / 6378137.0 / M_PI + (1LL << 31));
+	*y = std::round(((1LL << 32) - 1) - (iy * (1LL << 31) / 6378137.0 / M_PI + (1LL << 31)));
 
 	if (zoom != 0) {
-		*x >>= (32 - zoom);
-		*y >>= (32 - zoom);
+		*x = std::round((double) *x / (1LL << (32 - zoom)));
+		*y = std::round((double) *y / (1LL << (32 - zoom)));
 	}
 }
 
@@ -215,4 +216,8 @@ void set_projection_or_exit(const char *optarg) {
 		fprintf(stderr, "Unknown projection (-s): %s\n", optarg);
 		exit(EXIT_ARGS);
 	}
+}
+
+unsigned long long encode_vertex(unsigned int wx, unsigned int wy) {
+	return (((unsigned long long) wx) << 32) | wy;
 }

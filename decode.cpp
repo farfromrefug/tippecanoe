@@ -15,18 +15,24 @@
 #include <sys/stat.h>
 #include <sys/mman.h>
 #include <protozero/pbf_reader.hpp>
-#include <sys/stat.h>
 #include "mvt.hpp"
 #include "projection.hpp"
 #include "geometry.hpp"
 #include "write_json.hpp"
 #include "jsonpull/jsonpull.h"
+#include "mbtiles.hpp"
 #include "dirtiles.hpp"
+#include "pmtiles_file.hpp"
 #include "errors.hpp"
 
 int minzoom = 0;
 int maxzoom = 32;
 bool force = false;
+std::set<std::string> include_attr;
+
+bool progress_time() {
+	return false;
+}
 
 void do_stats(mvt_tile &tile, size_t size, bool compressed, int z, unsigned x, unsigned y, json_writer &state) {
 	state.json_write_hash();
@@ -212,7 +218,7 @@ void handle(std::string message, int z, unsigned x, unsigned y, std::set<std::st
 		} else if (coordinate_mode == 2) {  // integer
 			scale = 1;
 		}
-		layer_to_geojson(layer, z, x, y, !pipeline, pipeline, pipeline, false, 0, 0, 0, !force, state, scale);
+		layer_to_geojson(layer, z, x, y, !pipeline, pipeline, pipeline, false, 0, 0, 0, !force, state, scale, include_attr);
 
 		if (!pipeline) {
 			if (true) {
@@ -241,23 +247,26 @@ void decode(char *fname, int z, unsigned x, unsigned y, std::set<std::string> co
 	if (fd >= 0) {
 		struct stat st;
 		if (fstat(fd, &st) == 0) {
-			if (st.st_size < 50 * 1024 * 1024) {
-				char *map = (char *) mmap(NULL, st.st_size, PROT_READ, MAP_PRIVATE, fd, 0);
-				if (map != NULL && map != MAP_FAILED) {
-					if (strcmp(map, "SQLite format 3") != 0) {
-						if (z >= 0) {
+			char *map = (char *) mmap(NULL, st.st_size, PROT_READ, MAP_PRIVATE, fd, 0);
+			if (map != NULL && map != MAP_FAILED) {
+				if (strcmp(map, "SQLite format 3") != 0 && strncmp(map, "PMTiles", 7) != 0) {
+					if (z >= 0) {
+						if (st.st_size > 250 * 1024 * 1024) {
+							fprintf(stderr, "%s: unrealistically large single-tile size %zu\n", fname, (size_t) st.st_size);
+							exit(EXIT_MEMORY);
+						} else {
 							std::string s = std::string(map, st.st_size);
 							handle(s, z, x, y, to_decode, pipeline, stats, state, coordinate_mode);
 							munmap(map, st.st_size);
 							return;
-						} else {
-							fprintf(stderr, "Must specify zoom/x/y to decode a single pbf file\n");
-							exit(EXIT_ARGS);
 						}
+					} else {
+						fprintf(stderr, "Must specify zoom/x/y to decode a single pbf file\n");
+						exit(EXIT_ARGS);
 					}
 				}
-				munmap(map, st.st_size);
 			}
+			munmap(map, st.st_size);
 		} else {
 			perror("fstat");
 		}
@@ -271,11 +280,30 @@ void decode(char *fname, int z, unsigned x, unsigned y, std::set<std::string> co
 
 	struct stat st;
 	std::vector<zxy> tiles;
+
+	char *pmtiles_map = NULL;
+	std::vector<pmtiles::entry_zxy> entries;
+	bool is_pmtiles = false;
+
 	if (stat(fname, &st) == 0 && (st.st_mode & S_IFDIR) != 0) {
 		isdir = true;
 
 		db = dirmeta2tmp(fname);
 		tiles = enumerate_dirtiles(fname, minzoom, maxzoom);
+	} else if (pmtiles_has_suffix(fname)) {
+		int pmtiles_fd = open(fname, O_RDONLY | O_CLOEXEC);
+		pmtiles_map = (char *) mmap(NULL, st.st_size, PROT_READ, MAP_PRIVATE, pmtiles_fd, 0);
+		if (pmtiles_map == MAP_FAILED) {
+			perror("mmap in decode");
+			exit(EXIT_MEMORY);
+		}
+		if (close(pmtiles_fd) != 0) {
+			perror("close");
+			exit(EXIT_CLOSE);
+		}
+		db = pmtilesmeta2tmp(fname, pmtiles_map);
+		entries = pmtiles_entries_tms(pmtiles_map, minzoom, maxzoom);
+		is_pmtiles = true;
 	} else {
 		if (sqlite3_open(fname, &db) != SQLITE_OK) {
 			fprintf(stderr, "%s: %s\n", fname, sqlite3_errmsg(db));
@@ -381,6 +409,26 @@ void decode(char *fname, int z, unsigned x, unsigned y, std::set<std::string> co
 
 				handle(s, tiles[i].z, tiles[i].x, tiles[i].y, to_decode, pipeline, stats, state, coordinate_mode);
 			}
+		} else if (is_pmtiles) {
+			within = 0;
+
+			for (auto const &entry : entries) {
+				if (!pipeline && !stats) {
+					if (within) {
+						state.json_comma_newline();
+					}
+					within = 1;
+				}
+				if (stats) {
+					if (within) {
+						state.json_comma_newline();
+					}
+					within = 1;
+				}
+
+				std::string s{pmtiles_map + entry.offset, entry.length};
+				handle(s, entry.z, entry.x, entry.y, to_decode, pipeline, stats, state, coordinate_mode);
+			}
 		} else {
 			const char *sql = "SELECT tile_data, zoom_level, tile_column, tile_row from tiles where zoom_level between ? and ? order by zoom_level, tile_column, tile_row;";
 			sqlite3_stmt *stmt;
@@ -446,35 +494,48 @@ void decode(char *fname, int z, unsigned x, unsigned y, std::set<std::string> co
 	} else {
 		int handled = 0;
 		while (z >= 0 && !handled) {
-			const char *sql = "SELECT tile_data from tiles where zoom_level = ? and tile_column = ? and tile_row = ?;";
-			sqlite3_stmt *stmt;
-			if (sqlite3_prepare_v2(db, sql, -1, &stmt, NULL) != SQLITE_OK) {
-				fprintf(stderr, "%s: select failed: %s\n", fname, sqlite3_errmsg(db));
-				exit(EXIT_SQLITE);
-			}
-
-			sqlite3_bind_int(stmt, 1, z);
-			sqlite3_bind_int(stmt, 2, x);
-			sqlite3_bind_int(stmt, 3, (1LL << z) - 1 - y);
-
-			while (sqlite3_step(stmt) == SQLITE_ROW) {
-				int len = sqlite3_column_bytes(stmt, 0);
-				const char *s = (const char *) sqlite3_column_blob(stmt, 0);
-
-				if (s == NULL) {
-					fprintf(stderr, "Corrupt mbtiles file: null entry in tiles table\n");
+			if (is_pmtiles) {
+				uint64_t tile_offset;
+				uint32_t tile_length;
+				std::tie(tile_offset, tile_length) = pmtiles_get_tile(pmtiles_map, z, x, y);
+				if (tile_length > 0) {
+					if (z != oz) {
+						fprintf(stderr, "%s: Warning: using tile %d/%u/%u instead of %d/%u/%u\n", fname, z, x, y, oz, ox, oy);
+					}
+					std::string s{pmtiles_map + tile_offset, tile_length};
+					handle(s, z, x, y, to_decode, pipeline, stats, state, coordinate_mode);
+					handled = 1;
+				}
+			} else {
+				const char *sql = "SELECT tile_data from tiles where zoom_level = ? and tile_column = ? and tile_row = ?;";
+				sqlite3_stmt *stmt;
+				if (sqlite3_prepare_v2(db, sql, -1, &stmt, NULL) != SQLITE_OK) {
+					fprintf(stderr, "%s: select failed: %s\n", fname, sqlite3_errmsg(db));
 					exit(EXIT_SQLITE);
 				}
 
-				if (z != oz) {
-					fprintf(stderr, "%s: Warning: using tile %d/%u/%u instead of %d/%u/%u\n", fname, z, x, y, oz, ox, oy);
+				sqlite3_bind_int(stmt, 1, z);
+				sqlite3_bind_int(stmt, 2, x);
+				sqlite3_bind_int(stmt, 3, (1LL << z) - 1 - y);
+
+				while (sqlite3_step(stmt) == SQLITE_ROW) {
+					int len = sqlite3_column_bytes(stmt, 0);
+					const char *s = (const char *) sqlite3_column_blob(stmt, 0);
+
+					if (s == NULL) {
+						fprintf(stderr, "Corrupt mbtiles file: null entry in tiles table\n");
+						exit(EXIT_SQLITE);
+					}
+
+					if (z != oz) {
+						fprintf(stderr, "%s: Warning: using tile %d/%u/%u instead of %d/%u/%u\n", fname, z, x, y, oz, ox, oy);
+					}
+
+					handle(std::string(s, len), z, x, y, to_decode, pipeline, stats, state, coordinate_mode);
+					handled = 1;
 				}
-
-				handle(std::string(s, len), z, x, y, to_decode, pipeline, stats, state, coordinate_mode);
-				handled = 1;
+				sqlite3_finalize(stmt);
 			}
-
-			sqlite3_finalize(stmt);
 
 			z--;
 			x /= 2;
@@ -514,6 +575,7 @@ int main(int argc, char **argv) {
 		{"stats", no_argument, 0, 'S'},
 		{"force", no_argument, 0, 'f'},
 		{"exclude-metadata-row", required_argument, 0, 'x'},
+		{"include", required_argument, 0, 'y'},
 		{0, 0, 0, 0},
 	};
 
@@ -571,6 +633,10 @@ int main(int argc, char **argv) {
 
 		case 'x':
 			exclude_meta.insert(optarg);
+			break;
+
+		case 'y':
+			include_attr.insert(optarg);
 			break;
 
 		default:

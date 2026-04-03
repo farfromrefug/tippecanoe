@@ -58,6 +58,7 @@ void parse_geocsv(std::vector<struct serialization_state> &sst, std::string fnam
 	}
 
 	size_t seq = 0;
+	key_pool key_pool;
 	while ((s = csv_getline(f)).size() > 0) {
 		std::string err = check_utf8(s);
 		if (err != "") {
@@ -89,7 +90,7 @@ void parse_geocsv(std::vector<struct serialization_state> &sst, std::string fnam
 		drawvec dv;
 		dv.push_back(draw(VT_MOVETO, x, y));
 
-		std::vector<std::string> full_keys;
+		std::vector<std::shared_ptr<std::string>> full_keys;
 		std::vector<serial_val> full_values;
 
 		for (size_t i = 0; i < line.size(); i++) {
@@ -107,7 +108,7 @@ void parse_geocsv(std::vector<struct serialization_state> &sst, std::string fnam
 				}
 				sv.s = line[i];
 
-				full_keys.push_back(header[i]);
+				full_keys.push_back(key_pool.pool(header[i]));
 				full_values.push_back(sv);
 			}
 		}
@@ -115,12 +116,11 @@ void parse_geocsv(std::vector<struct serialization_state> &sst, std::string fnam
 		serial_feature sf;
 
 		sf.layer = layer;
-		sf.layername = layername;
 		sf.segment = sst[0].segment;
 		sf.has_id = false;
 		sf.id = 0;
-		sf.has_tippecanoe_minzoom = false;
-		sf.has_tippecanoe_maxzoom = false;
+		sf.tippecanoe_minzoom = -1;
+		sf.tippecanoe_maxzoom = -1;
 		sf.feature_minzoom = false;
 		sf.seq = *(sst[0].layer_seq);
 		sf.geometry = dv;
@@ -128,7 +128,7 @@ void parse_geocsv(std::vector<struct serialization_state> &sst, std::string fnam
 		sf.full_keys = full_keys;
 		sf.full_values = full_values;
 
-		serialize_feature(&sst[0], sf);
+		serialize_feature(&sst[0], sf, layername);
 	}
 
 	if (fname.size() != 0) {

@@ -10,7 +10,6 @@
 #include <sys/stat.h>
 #include <sys/types.h>
 #include <sys/mman.h>
-#include <string.h>
 #include <fcntl.h>
 #include <ctype.h>
 #include <errno.h>
@@ -41,12 +40,12 @@
 #include "milo/dtoa_milo.h"
 #include "errors.hpp"
 
-int serialize_geojson_feature(struct serialization_state *sst, json_object *geometry, json_object *properties, json_object *id, int layer, json_object *tippecanoe, json_object *feature, std::string layername) {
+int serialize_geojson_feature(struct serialization_state *sst, json_object *geometry, json_object *properties, json_object *id, int layer, json_object *tippecanoe, json_object *feature, std::string const &layername) {
 	json_object *geometry_type = json_hash_get(geometry, "type");
 	if (geometry_type == NULL) {
 		static int warned = 0;
 		if (!warned) {
-			fprintf(stderr, "%s:%d: null geometry (additional not reported)\n", sst->fname, sst->line);
+			fprintf(stderr, "%s:%d: null geometry (additional not reported): ", sst->fname, sst->line);
 			json_context(feature);
 			warned = 1;
 		}
@@ -55,14 +54,14 @@ int serialize_geojson_feature(struct serialization_state *sst, json_object *geom
 	}
 
 	if (geometry_type->type != JSON_STRING) {
-		fprintf(stderr, "%s:%d: geometry type is not a string\n", sst->fname, sst->line);
+		fprintf(stderr, "%s:%d: geometry type is not a string: ", sst->fname, sst->line);
 		json_context(feature);
 		return 0;
 	}
 
 	json_object *coordinates = json_hash_get(geometry, "coordinates");
 	if (coordinates == NULL || coordinates->type != JSON_ARRAY) {
-		fprintf(stderr, "%s:%d: feature without coordinates array\n", sst->fname, sst->line);
+		fprintf(stderr, "%s:%d: feature without coordinates array: ", sst->fname, sst->line);
 		json_context(feature);
 		return 0;
 	}
@@ -74,14 +73,14 @@ int serialize_geojson_feature(struct serialization_state *sst, json_object *geom
 		}
 	}
 	if (t >= GEOM_TYPES) {
-		fprintf(stderr, "%s:%d: Can't handle geometry type %s\n", sst->fname, sst->line, geometry_type->value.string.string);
+		fprintf(stderr, "%s:%d: Can't handle geometry type %s: ", sst->fname, sst->line, geometry_type->value.string.string);
 		json_context(feature);
 		return 0;
 	}
 
 	int tippecanoe_minzoom = -1;
 	int tippecanoe_maxzoom = -1;
-	std::string tippecanoe_layername;
+	std::string tippecanoe_layername = layername;
 
 	if (tippecanoe != NULL) {
 		json_object *min = json_hash_get(tippecanoe, "minzoom");
@@ -106,7 +105,8 @@ int serialize_geojson_feature(struct serialization_state *sst, json_object *geom
 		if (id->type == JSON_NUMBER) {
 			if (id->value.number.number >= 0) {
 				char *err = NULL;
-				id_value = strtoull(milo::dtoa_milo(id->value.number.number).c_str(), &err, 10);
+				std::string id_number = milo::dtoa_milo(id->value.number.number);
+				id_value = strtoull(id_number.c_str(), &err, 10);
 
 				if (id->value.number.large_unsigned != 0) {
 					id_value = id->value.number.large_unsigned;
@@ -182,41 +182,24 @@ int serialize_geojson_feature(struct serialization_state *sst, json_object *geom
 		nprop = properties->value.object.length;
 	}
 
-	std::vector<char *> metakey;
-	metakey.resize(nprop);
+	std::vector<std::shared_ptr<std::string>> full_keys;
+	std::vector<serial_val> values;
 
-	std::vector<std::string> metaval;
-	metaval.resize(nprop);
-
-	std::vector<int> metatype;
-	metatype.resize(nprop);
-
-	size_t m = 0;
+	full_keys.reserve(nprop);
+	values.reserve(nprop);
+	key_pool key_pool;
 
 	for (size_t i = 0; i < nprop; i++) {
 		if (properties->value.object.keys[i]->type == JSON_STRING) {
-			std::string s(properties->value.object.keys[i]->value.string.string);
+			serial_val sv = stringify_value(properties->value.object.values[i], sst->fname, sst->line, feature);
 
-			int type = -1;
-			std::string val;
-			stringify_value(properties->value.object.values[i], type, val, sst->fname, sst->line, feature);
-
-			if (type >= 0) {
-				metakey[m] = properties->value.object.keys[i]->value.string.string;
-				metatype[m] = type;
-				metaval[m] = val;
-				m++;
-			} else {
-				metakey[m] = properties->value.object.keys[i]->value.string.string;
-				metatype[m] = mvt_null;
-				metaval[m] = "null";
-				m++;
-			}
+			full_keys.emplace_back(key_pool.pool(properties->value.object.keys[i]->value.string.string));
+			values.push_back(std::move(sv));
 		}
 	}
 
 	drawvec dv;
-	parse_geometry(t, coordinates, dv, VT_MOVETO, sst->fname, sst->line, feature);
+	parse_coordinates(t, coordinates, dv, VT_MOVETO, sst->fname, sst->line, feature);
 
 	serial_feature sf;
 	sf.layer = layer;
@@ -224,31 +207,15 @@ int serialize_geojson_feature(struct serialization_state *sst, json_object *geom
 	sf.t = mb_geometry[t];
 	sf.has_id = has_id;
 	sf.id = id_value;
-	sf.has_tippecanoe_minzoom = (tippecanoe_minzoom != -1);
 	sf.tippecanoe_minzoom = tippecanoe_minzoom;
-	sf.has_tippecanoe_maxzoom = (tippecanoe_maxzoom != -1);
 	sf.tippecanoe_maxzoom = tippecanoe_maxzoom;
 	sf.geometry = dv;
 	sf.feature_minzoom = 0;	 // Will be filled in during index merging
 	sf.seq = *(sst->layer_seq);
+	sf.full_keys = std::move(full_keys);
+	sf.full_values = std::move(values);
 
-	if (tippecanoe_layername.size() != 0) {
-		sf.layername = tippecanoe_layername;
-	} else {
-		sf.layername = layername;
-	}
-
-	for (size_t i = 0; i < m; i++) {
-		sf.full_keys.push_back(metakey[i]);
-
-		serial_val sv;
-		sv.type = metatype[i];
-		sv.s = metaval[i];
-
-		sf.full_values.push_back(sv);
-	}
-
-	return serialize_feature(sst, sf);
+	return serialize_feature(sst, sf, tippecanoe_layername);
 }
 
 void check_crs(json_object *j, const char *reading) {

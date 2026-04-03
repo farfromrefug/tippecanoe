@@ -4,8 +4,11 @@
 #include <stddef.h>
 #include <atomic>
 #include <string>
+#include <vector>
+#include <map>
 
 #include "json_logger.hpp"
+#include "serial.hpp"
 
 struct index {
 	long long start = 0;
@@ -19,18 +22,6 @@ struct index {
 	    : t(0),
 	      seq(0) {
 	}
-};
-
-struct clipbbox {
-	double lon1;
-	double lat1;
-	double lon2;
-	double lat2;
-
-	long long minx;
-	long long miny;
-	long long maxx;
-	long long maxy;
 };
 
 extern std::vector<clipbbox> clipbboxes;
@@ -47,14 +38,21 @@ extern int extra_detail;
 
 extern size_t CPUS;
 extern size_t TEMP_FILES;
+extern size_t memsize;
 
 extern size_t max_tile_size;
 extern size_t max_tile_features;
 extern int cluster_distance;
+extern int cluster_maxzoom;
 extern std::string attribute_for_id;
 extern int tiny_polygon_size;
 extern size_t limit_tile_feature_count;
 extern size_t limit_tile_feature_count_at_maxzoom;
+extern std::map<std::string, serial_val> set_attributes;
+extern long long extend_zooms_max;
+extern int retain_points_multiplier;
+extern size_t maximum_string_attribute_length;
+extern unsigned long long preserve_multiplier_density_threshold;
 
 struct order_field {
 	std::string name;
