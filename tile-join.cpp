@@ -44,6 +44,7 @@
 #include "geometry.hpp"
 #include "thread.hpp"
 #include "platform.hpp"
+#include "usage.hpp"
 
 int pk = false;
 int pC = false;
@@ -335,7 +336,7 @@ void append_tile(std::string message, int z, unsigned x, unsigned y, std::map<st
 							outfeature.geometry[i].x = outfeature.geometry[i].x * outlayer.extent / layer.extent;
 							outfeature.geometry[i].y = outfeature.geometry[i].y * outlayer.extent / layer.extent;
 						}
- 					}
+					}
 
 					for (auto const &g : outfeature.geometry) {
 						if (g.op == mvt_moveto || g.op == mvt_lineto) {
@@ -892,7 +893,7 @@ void *join_worker(void *v) {
 }
 
 void dispatch_tasks(std::map<zxy, std::vector<std::string>> &tasks, std::vector<std::map<std::string, layermap_entry>> &layermaps, sqlite3 *outdb, const char *outdir, std::vector<std::string> &header, std::map<std::string, std::vector<std::string>> &mapping, sqlite3 *db, std::set<std::string> &exclude, std::set<std::string> &include, int ifmatched, std::set<std::string> &keep_layers, std::set<std::string> &remove_layers, json_object *filter, struct tileset_reader *readers, double *minlat, double *minlon, double *maxlat, double *maxlon, double *minlon2, double *maxlon2) {
-	pthread_t pthreads[CPUS];
+	std::vector<pthread_t> pthreads(CPUS);
 	std::vector<arg> args;
 
 	for (size_t i = 0; i < CPUS; i++) {
@@ -965,44 +966,44 @@ void dispatch_tasks(std::map<zxy, std::vector<std::string>> &tasks, std::vector<
 }
 
 void handle_strategies(const unsigned char *s, std::vector<strategy> *st) {
-	json_pull *jp = json_begin_string((const char *) s);
-	json_object *o = json_read_tree(jp);
+	json_pull_ptr jp = json_begin_string((const char *) s);
+	json_object_ptr o = json_read_tree(jp);
 
-	if (o != NULL && o->type == JSON_ARRAY) {
-		for (size_t i = 0; i < o->value.array.length; i++) {
-			json_object *h = o->value.array.array[i];
+	if (o != nullptr && o->type == JSON_ARRAY) {
+		for (size_t i = 0; i < o->array().size(); i++) {
+			const json_object_ptr &h = o->array()[i];
 			if (h->type == JSON_HASH) {
-				for (size_t j = 0; j < h->value.object.length; j++) {
-					json_object *k = h->value.object.keys[j];
-					json_object *v = h->value.object.values[j];
+				for (size_t j = 0; j < h->entries().size(); j++) {
+					const auto &kv = h->entries()[j];
 
-					if (k->type != JSON_STRING) {
+					if (kv.key->type != JSON_STRING) {
 						fprintf(stderr, "Key %zu of %zu is not a string: %s\n", j, i, s);
-					} else if (v->type != JSON_NUMBER) {
+					} else if (kv.value->type != JSON_NUMBER) {
 						fprintf(stderr, "Value %zu of %zu is not a number: %s\n", j, i, s);
 					} else {
 						if (i >= st->size()) {
 							st->resize(i + 1);
 						}
 
-						if (strcmp(k->value.string.string, "dropped_by_rate") == 0) {
-							(*st)[i].dropped_by_rate += v->value.number.number;
-						} else if (strcmp(k->value.string.string, "dropped_by_gamma") == 0) {
-							(*st)[i].dropped_by_gamma += v->value.number.number;
-						} else if (strcmp(k->value.string.string, "dropped_as_needed") == 0) {
-							(*st)[i].dropped_as_needed += v->value.number.number;
-						} else if (strcmp(k->value.string.string, "coalesced_as_needed") == 0) {
-							(*st)[i].coalesced_as_needed += v->value.number.number;
-						} else if (strcmp(k->value.string.string, "truncated_zooms") == 0) {
-							(*st)[i].truncated_zooms += v->value.number.number;
-						} else if (strcmp(k->value.string.string, "detail_reduced") == 0) {
-							(*st)[i].detail_reduced += v->value.number.number;
-						} else if (strcmp(k->value.string.string, "tiny_polygons") == 0) {
-							(*st)[i].tiny_polygons += v->value.number.number;
-						} else if (strcmp(k->value.string.string, "tile_size_desired") == 0) {
-							(*st)[i].tile_size += v->value.number.number;
-						} else if (strcmp(k->value.string.string, "feature_count_desired") == 0) {
-							(*st)[i].feature_count += v->value.number.number;
+						const std::string &key = kv.key->string();
+						if (key == "dropped_by_rate") {
+							(*st)[i].dropped_by_rate += kv.value->number();
+						} else if (key == "dropped_by_gamma") {
+							(*st)[i].dropped_by_gamma += kv.value->number();
+						} else if (key == "dropped_as_needed") {
+							(*st)[i].dropped_as_needed += kv.value->number();
+						} else if (key == "coalesced_as_needed") {
+							(*st)[i].coalesced_as_needed += kv.value->number();
+						} else if (key == "truncated_zooms") {
+							(*st)[i].truncated_zooms += kv.value->number();
+						} else if (key == "detail_reduced") {
+							(*st)[i].detail_reduced += kv.value->number();
+						} else if (key == "tiny_polygons") {
+							(*st)[i].tiny_polygons += kv.value->number();
+						} else if (key == "tile_size_desired") {
+							(*st)[i].tile_size += kv.value->number();
+						} else if (key == "feature_count_desired") {
+							(*st)[i].feature_count += kv.value->number();
 						}
 					}
 				}
@@ -1010,22 +1011,19 @@ void handle_strategies(const unsigned char *s, std::vector<strategy> *st) {
 				fprintf(stderr, "Element %zu is not a hash: %s\n", i, s);
 			}
 		}
-		json_free(o);
 	}
-
-	json_end(jp);
 }
 
 void handle_vector_layers(json_object *vector_layers, std::map<std::string, layermap_entry> &layermap, std::map<std::string, std::string> &attribute_descriptions) {
-	if (vector_layers != NULL && vector_layers->type == JSON_ARRAY) {
-		for (size_t i = 0; i < vector_layers->value.array.length; i++) {
-			if (vector_layers->value.array.array[i]->type == JSON_HASH) {
-				json_object *id = json_hash_get(vector_layers->value.array.array[i], "id");
-				json_object *desc = json_hash_get(vector_layers->value.array.array[i], "description");
+	if (vector_layers != nullptr && vector_layers->type == JSON_ARRAY) {
+		for (size_t i = 0; i < vector_layers->array().size(); i++) {
+			if (vector_layers->array()[i]->type == JSON_HASH) {
+				json_object *id = json_hash_get(vector_layers->array()[i].get(), "id");
+				json_object *desc = json_hash_get(vector_layers->array()[i].get(), "description");
 
-				if (id != NULL && desc != NULL && id->type == JSON_STRING && desc->type == JSON_STRING) {
-					std::string sid = id->value.string.string;
-					std::string sdesc = desc->value.string.string;
+				if (id != nullptr && desc != nullptr && id->type == JSON_STRING && desc->type == JSON_STRING) {
+					const std::string &sid = id->string();
+					const std::string &sdesc = desc->string();
 
 					if (sdesc.size() != 0) {
 						auto f = layermap.find(sid);
@@ -1035,17 +1033,18 @@ void handle_vector_layers(json_object *vector_layers, std::map<std::string, laye
 					}
 				}
 
-				json_object *fields = json_hash_get(vector_layers->value.array.array[i], "fields");
-				if (fields != NULL && fields->type == JSON_HASH) {
-					for (size_t j = 0; j < fields->value.object.length; j++) {
-						if (fields->value.object.keys[j]->type == JSON_STRING && fields->value.object.values[j]->type) {
-							const char *desc2 = fields->value.object.values[j]->value.string.string;
+				json_object *fields = json_hash_get(vector_layers->array()[i].get(), "fields");
+				if (fields != nullptr && fields->type == JSON_HASH) {
+					for (const auto &e : fields->entries()) {
+						if (e.key != nullptr && e.key->type == JSON_STRING &&
+						    e.value != nullptr && e.value->type == JSON_STRING) {
+							const std::string &desc2 = e.value->string();
 
-							if (strcmp(desc2, "Number") != 0 &&
-							    strcmp(desc2, "String") != 0 &&
-							    strcmp(desc2, "Boolean") != 0 &&
-							    strcmp(desc2, "Mixed") != 0) {
-								attribute_descriptions.insert(std::pair<std::string, std::string>(fields->value.object.keys[j]->value.string.string, desc2));
+							if (desc2 != "Number" &&
+							    desc2 != "String" &&
+							    desc2 != "Boolean" &&
+							    desc2 != "Mixed") {
+								attribute_descriptions.insert(std::pair<std::string, std::string>(e.key->string(), desc2));
 							}
 						}
 					}
@@ -1205,17 +1204,14 @@ void decode(struct tileset_reader *readers, std::map<std::string, layermap_entry
 				const unsigned char *s = sqlite3_column_text(stmt, 0);
 
 				if (s != NULL) {
-					json_pull *jp = json_begin_string((const char *) s);
-					json_object *o = json_read_tree(jp);
+					json_pull_ptr jp = json_begin_string((const char *) s);
+					json_object_ptr o = json_read_tree(jp);
 
-					if (o != NULL && o->type == JSON_HASH) {
+					if (o != nullptr && o->type == JSON_HASH) {
 						json_object *vector_layers = json_hash_get(o, "vector_layers");
 
 						handle_vector_layers(vector_layers, layermap, attribute_descriptions);
-						json_free(o);
 					}
-
-					json_end(jp);
 				}
 			}
 
@@ -1253,8 +1249,81 @@ void decode(struct tileset_reader *readers, std::map<std::string, layermap_entry
 	}
 }
 
+static const struct option long_options[] = {
+	{"Output tileset", 0, 0, 0},
+	{"output", required_argument, 0, 'o'},
+	{"output-to-directory", required_argument, 0, 'e'},
+	{"force", no_argument, 0, 'f'},
+
+	{"Tileset description and attribution", 0, 0, 0},
+	{"name", required_argument, 0, 'n'},
+	{"attribution", required_argument, 0, 'A'},
+	{"description", required_argument, 0, 'N'},
+
+	{"Input tilesets", 0, 0, 0},
+	{"read-from", required_argument, 0, 'r'},
+
+	{"Zoom levels", 0, 0, 0},
+	{"maximum-zoom", required_argument, 0, 'z'},
+	{"minimum-zoom", required_argument, 0, 'Z'},
+	{"overzoom", no_argument, 0, 'O'},
+	{"buffer", required_argument, 0, 'b'},
+
+	{"Layer names", 0, 0, 0},
+	{"layer", required_argument, 0, 'l'},
+	{"exclude-layer", required_argument, 0, 'L'},
+	{"rename-layer", required_argument, 0, 'R'},
+
+	{"Joining with a CSV file", 0, 0, 0},
+	{"csv", required_argument, 0, 'c'},
+	{"if-matched", no_argument, 0, 'i'},
+	{"empty-csv-columns-are-null", no_argument, &pe, 1},
+
+	{"Filtering feature attributes", 0, 0, 0},
+	{"exclude", required_argument, 0, 'x'},
+	{"include", required_argument, 0, 'y'},
+	{"exclude-all", no_argument, 0, 'X'},
+	{"exclude-all-tile-attributes", no_argument, 0, '~'},
+	{"exclude-all-tile-geometries", no_argument, 0, '~'},
+
+	{"Filtering features by attributes", 0, 0, 0},
+	{"feature-filter-file", required_argument, 0, 'J'},
+	{"feature-filter", required_argument, 0, 'j'},
+
+	{"Setting or disabling tile size limits", 0, 0, 0},
+	{"no-tile-size-limit", no_argument, &pk, 1},
+	{"no-tile-compression", no_argument, &pC, 1},
+	{"no-tile-stats", no_argument, &pg, 1},
+	{"tile-stats-attributes-limit", required_argument, 0, '~'},
+	{"tile-stats-sample-values-limit", required_argument, 0, '~'},
+	{"tile-stats-values-limit", required_argument, 0, '~'},
+
+	{"Progress indicator", 0, 0, 0},
+	{"quiet", no_argument, 0, 'q'},
+
+	{"", 0, 0, 0},
+	{"prevent", required_argument, 0, 'p'},
+	{"unidecode-data", required_argument, 0, '~'},
+
+	{0, 0, 0, 0},
+};
+
+// the options above, with the usage message headings removed
+static struct option real_long_options[sizeof(long_options) / sizeof(long_options[0])];
+
 void usage(char **argv) {
-	fprintf(stderr, "Usage: %s [-f] [-i] [-pk] [-pC] [-c joins.csv] [-X] [-x exclude ...] [-y include ...] [-r inputfile.txt ] -o new.mbtiles source.mbtiles ...\n", argv[0]);
+	static const char *const forms[] = {
+		"[options] source.mbtiles ...",
+		"[options] --read-from=inputfile.txt",
+		NULL,
+	};
+	static const struct usage_required_option required[] = {
+		{"output", "new.mbtiles", 1},
+		{"output-to-directory", "directory", 1},
+		{NULL, NULL, 0},
+	};
+
+	print_usage(stderr, argv[0], forms, long_options, required);
 	exit(EXIT_ARGS);
 }
 
@@ -1266,7 +1335,7 @@ int main(int argc, char **argv) {
 	int force = 0;
 	int ifmatched = 0;
 	int filearg = 0;
-	json_object *filter = NULL;
+	json_object_ptr filter;
 
 	std::string join_sqlite_fname;
 
@@ -1298,57 +1367,8 @@ int main(int argc, char **argv) {
 
 	std::string set_name, set_description, set_attribution;
 
-	struct option long_options[] = {
-		{"output", required_argument, 0, 'o'},
-		{"output-to-directory", required_argument, 0, 'e'},
-		{"force", no_argument, 0, 'f'},
-		{"overzoom", no_argument, 0, 'O'},
-		{"buffer", required_argument, 0, 'b'},
-		{"if-matched", no_argument, 0, 'i'},
-		{"attribution", required_argument, 0, 'A'},
-		{"name", required_argument, 0, 'n'},
-		{"description", required_argument, 0, 'N'},
-		{"prevent", required_argument, 0, 'p'},
-		{"csv", required_argument, 0, 'c'},
-		{"exclude", required_argument, 0, 'x'},
-		{"exclude-all", no_argument, 0, 'X'},
-		{"include", required_argument, 0, 'y'},
-		{"exclude-all-tile-attributes", no_argument, 0, '~'},
-		{"exclude-all-tile-geometries", no_argument, 0, '~'},
-		{"layer", required_argument, 0, 'l'},
-		{"exclude-layer", required_argument, 0, 'L'},
-		{"quiet", no_argument, 0, 'q'},
-		{"maximum-zoom", required_argument, 0, 'z'},
-		{"minimum-zoom", required_argument, 0, 'Z'},
-		{"feature-filter-file", required_argument, 0, 'J'},
-		{"feature-filter", required_argument, 0, 'j'},
-		{"rename-layer", required_argument, 0, 'R'},
-		{"read-from", required_argument, 0, 'r'},
-
-		{"use-attribute-for-id", required_argument, 0, '~'},
-
-		{"no-tile-size-limit", no_argument, &pk, 1},
-		{"no-tile-compression", no_argument, &pC, 1},
-		{"empty-csv-columns-are-null", no_argument, &pe, 1},
-		{"no-tile-stats", no_argument, &pg, 1},
-		{"tile-stats-attributes-limit", required_argument, 0, '~'},
-		{"tile-stats-sample-values-limit", required_argument, 0, '~'},
-		{"tile-stats-values-limit", required_argument, 0, '~'},
-		{"unidecode-data", required_argument, 0, '~'},
-
-		{0, 0, 0, 0},
-	};
-
-	std::string getopt_str;
-	for (size_t lo = 0; long_options[lo].name != NULL; lo++) {
-		if (long_options[lo].val > ' ') {
-			getopt_str.push_back(long_options[lo].val);
-
-			if (long_options[lo].has_arg == required_argument) {
-				getopt_str.push_back(':');
-			}
-		}
-	}
+	strip_usage_headings(long_options, real_long_options);
+	std::string getopt_str = getopt_string(real_long_options);
 
 	extern int optind;
 	extern char *optarg;
@@ -1357,7 +1377,7 @@ int main(int argc, char **argv) {
 	std::string commandline = format_commandline(argc, argv);
 
 	int option_index = 0;
-	while ((i = getopt_long(argc, argv, getopt_str.c_str(), long_options, &option_index)) != -1) {
+	while ((i = getopt_long(argc, argv, getopt_str.c_str(), real_long_options, &option_index)) != -1) {
 		switch (i) {
 		case 0:
 			break;
@@ -1502,7 +1522,7 @@ int main(int argc, char **argv) {
 			break;
 
 		case '~': {
-			const char *opt = long_options[option_index].name;
+			const char *opt = real_long_options[option_index].name;
 			if (strcmp(opt, "tile-stats-attributes-limit") == 0) {
 				max_tilestats_attributes = atoi(optarg);
 			} else if (strcmp(opt, "tile-stats-sample-values-limit") == 0) {
@@ -1596,7 +1616,7 @@ int main(int argc, char **argv) {
 	std::string generator_options;
 	std::vector<strategy> strategies;
 
-	decode(readers, layermap, outdb, out_dir, &st, header, mapping, db, exclude, include, ifmatched, attribution, description, keep_layers, remove_layers, name, filter, attribute_descriptions, generator_options, &strategies);
+	decode(readers, layermap, outdb, out_dir, &st, header, mapping, db, exclude, include, ifmatched, attribution, description, keep_layers, remove_layers, name, filter.get(), attribute_descriptions, generator_options, &strategies);
 
 	if (set_attribution.size() != 0) {
 		attribution = set_attribution;
@@ -1648,9 +1668,7 @@ int main(int argc, char **argv) {
 		mbtiles_close(outdb, argv[0]);
 	}
 
-	if (filter != NULL) {
-		json_free(filter);
-	}
+	filter.reset();
 
 	if (pmtiles_has_suffix(out_mbtiles)) {
 		mbtiles_map_image_to_pmtiles(out_mbtiles, m, !pC, quiet, false);

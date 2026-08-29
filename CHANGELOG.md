@@ -1,3 +1,105 @@
+# 2.82.0
+
+* Fix corruption of a JSON array when a non-final element was removed from it.
+  The old `json_free` / `json_disconnect` passed an element count to `memmove`
+  where a byte count was required, so pruning element 0 of an 8-element array
+  left the first two slots pointing at the same node -- a double free at
+  teardown -- and silently dropped the last element. Only reachable through a
+  whole-document tree, because removing the most recently added element made
+  the bad `memmove` a zero-length no-op. (#388)
+* Rewrite `jsonpull` in C++ with `unique_ptr` ownership, `std::vector` for
+  arrays and hash entries, and `std::string` for string values, replacing the
+  hand-rolled `malloc`/`realloc`/`free` memory management. Value payloads now
+  live in type-tagged subclasses reached through asserting accessors, so
+  reading a hash as a string fails immediately instead of silently returning
+  garbage. (#388)
+* Fix `tippecanoe-json-tool --extract` crashing on a numeric attribute, which
+  read the number's storage as a string pointer. (#388)
+* Fix decoding of a `\u` escape sequence in which a high surrogate is followed
+  by a non-surrogate BMP code point, which combined the two into a single
+  wrong code point. (#388)
+* Fix a `\uFFFF` escape being decoded to the overlong, invalid four-byte
+  UTF-8 sequence `F0 8F BF BF` instead of `EF BF BF`. (#388)
+* Fix tile-join reading a non-string field type out of a tileset's tilejson.
+  (#388)
+* Fix `tippecanoe-decode` and tile-join crashing on a directory tileset whose
+  `metadata.json` holds a non-string value, such as a numeric `minzoom` or a
+  nested object. Those entries are now reported and skipped. (#388)
+* Fix an uninitialized read when a prefilter or postfilter emitted a feature
+  with `"properties": null`. Both filter readers accepted a null `properties`
+  and then read its length as though it were a hash, which was never
+  initialized for a non-container node. (#388)
+* Fix the include guard in `evaluator.hpp`, which defined `EVALUATOR HPP`
+  instead of `EVALUATOR_HPP` and so never guarded anything. (#388)
+
+# 2.81.0
+
+* Add `--drop-by-attribute-as-needed=`*attribute* to drop the features with
+  the lowest values of a numeric attribute from oversized tiles, and
+  `--drop-by-attribute-order=desc` to drop the highest values instead.
+  Features exactly at the threshold are kept rather than dropped. (#384, #385)
+* Add `--exclude-all-tile-geometries` to tile-join, to produce tiles that
+  carry only attributes. (#382)
+* Generate each tool's usage message from the same option table that
+  `getopt_long()` reads, so the hand-written lists in tile-join,
+  tippecanoe-overzoom, tippecanoe-json-tool, tippecanoe-decode, and
+  tippecanoe-enumerate can no longer fall behind the options actually
+  accepted. Options previously reachable only by their short names are now
+  listed. tippecanoe-overzoom reports a missing `-o` instead of passing a
+  null pointer to `fopen()`, and tippecanoe prints its usage when run with
+  no arguments. (#409)
+* Fix the radix sort used by `--prefer-radix-sort`. A bucket written out
+  directly rather than through the merge was written one byte longer than
+  its length prefix claimed, desynchronizing everything read from the
+  geometry after it. Subdividing could also recurse forever once it ran out
+  of files to split with, shifting by the full width of the index and
+  writing past the end of the arrays of buckets. Radix-sorted output is now
+  checked against the in-memory sort rather than against a stored copy. (#404)
+* Read FlatGeobuf integer and float properties as numbers. They were tagged
+  with types that the rest of tippecanoe does not treat as numeric, so they
+  were reported in tilestats as "mixed", with quoted values and no min or
+  max, and warned when used as a feature ID. ULong properties are now also
+  read as unsigned rather than signed. (#395)
+* Respect the `-t` temporary directory option in sorting operations, which
+  previously always used the system temporary directory. (#368)
+* Keep `--generate-variable-depth-tile-pyramid` from silently dropping
+  features whose explicit per-feature `minzoom` is deeper than the zoom at
+  which their region becomes a leaf. Such a feature was excluded from the
+  leaf tile while its children were never generated, so it appeared at no
+  zoom at all. (#397, #399)
+* Drop a polygon hole that no remaining ring can parent, instead of failing
+  the whole run. Degenerate input could abort tiling over a single
+  unrepresentable sliver. (#401)
+* Clamp the feature extent to the `long long` range before converting it,
+  at both ends. The previous `extent <= LLONG_MAX` guard was doubly wrong:
+  `LLONG_MAX` is not representable as a double and rounds up, so an extent
+  at the very top of the range overflowed the conversion and came out as the
+  most negative value rather than the largest, and the guard admitted
+  everything below `LLONG_MIN` as well, which overflowed the other way. Areas
+  are signed, so holes that outweigh their rings can reach the low end. (#406)
+* Initialize the full width of the `mvt_value` numeric union, which left the
+  bytes of the wider unused member indeterminate even though the implicit
+  copy constructor copies the union as a whole. (#406)
+* Replace all variable-length arrays with `std::vector` and `std::string`,
+  and build with `-Wvla`. VLAs are a compiler extension rather than standard
+  C++, and clang warns about every one of them by default. (#406)
+* Remove the unused Dockerfiles, Travis configuration, and lambda
+  directory. (#365)
+* Correct README statements that disagreed with the code. Among them, `-aD`
+  and `-aS` were documented the wrong way round,
+  `--limit-base-zoom-to-maximum-zoom` was given as `-Pb` rather than `-pb`,
+  and the dot-dropping description had both the fraction and the zoom
+  direction backwards: tippecanoe keeps 1/2.5 of the dots at zooms below the
+  base zoom, rather than dropping that share above it. (#410)
+* Generate `man/tippecanoe.1` with go-md2man rather than md2man-roff, which
+  is packaged only as a Ruby gem and so had let the page drift out of date.
+  The page now has a proper header and a NAME section, so `man -k` and
+  `whatis` can find it, and no longer silently drops or mangles text the old
+  converter mishandled. CI checks it against README.md. (#408)
+* Documentation fixes: correct three misspellings in the README and man
+  page, repair the dead All Streets link, and tag more README code blocks
+  with their language. (#375, #391, #400)
+
 # 2.80.0
 
 * Remove undocumented command-line options
