@@ -171,40 +171,41 @@ void mbtiles_write_tile(sqlite3 *outdb, int z, int tx, int ty, const char *data,
 }
 
 void mbtiles_erase_zoom(sqlite3 *outdb, int z) {
+	// This fork stores tiles in "tiles_shallow" + "tiles_data" (see
+	// mbtiles_create), not in the upstream "map" + "images" pair. Deleting
+	// from "map" therefore failed to even prepare, and because that is a
+	// hard exit, every tile that overran --maximum-tile-bytes killed the
+	// whole build instead of being retried with fewer features.
 	sqlite3_stmt *stmt;
 
-	const char *query = "delete from map where zoom_level = ?";
+	const char *query = "delete from tiles_shallow where zoom_level = ?";
 	if (sqlite3_prepare_v2(outdb, query, -1, &stmt, NULL) != SQLITE_OK) {
-		fprintf(stderr, "sqlite3 delete map prep failed\n");
+		fprintf(stderr, "sqlite3 delete tiles_shallow prep failed: %s\n", sqlite3_errmsg(outdb));
 		exit(EXIT_SQLITE);
 	}
 
 	sqlite3_bind_int(stmt, 1, z);
 	if (sqlite3_step(stmt) != SQLITE_DONE) {
-		fprintf(stderr, "sqlite3 delete map failed: %s\n", sqlite3_errmsg(outdb));
+		fprintf(stderr, "sqlite3 delete tiles_shallow failed: %s\n", sqlite3_errmsg(outdb));
 		exit(EXIT_SQLITE);
 	}
 	if (sqlite3_finalize(stmt) != SQLITE_OK) {
-		fprintf(stderr, "sqlite3 delete map finalize failed: %s\n", sqlite3_errmsg(outdb));
+		fprintf(stderr, "sqlite3 delete tiles_shallow finalize failed: %s\n", sqlite3_errmsg(outdb));
 		exit(EXIT_SQLITE);
 	}
 
-	query = "delete from images where zoom_level = ?";
-	if (sqlite3_prepare_v2(outdb, query, -1, &stmt, NULL) != SQLITE_OK) {
-		fprintf(stderr, "sqlite3 delete images prep failed\n");
-		exit(EXIT_SQLITE);
-	}
-
-	sqlite3_bind_int(stmt, 1, z);
-	if (sqlite3_step(stmt) != SQLITE_DONE) {
-		fprintf(stderr, "sqlite3 delete images failed: %s\n", sqlite3_errmsg(outdb));
-		exit(EXIT_SQLITE);
-	}
-	if (sqlite3_finalize(stmt) != SQLITE_OK) {
-		fprintf(stderr, "sqlite3 delete images finalize failed: %s\n", sqlite3_errmsg(outdb));
+	// The blobs are shared between tiles, so only the ones nothing points at
+	// any more can go.
+	const char *orphans =
+		"delete from tiles_data where tile_data_id not in "
+		"(select tile_data_id from tiles_shallow)";
+	char *err = NULL;
+	if (sqlite3_exec(outdb, orphans, NULL, NULL, &err) != SQLITE_OK) {
+		fprintf(stderr, "sqlite3 delete orphaned tiles_data failed: %s\n", err);
 		exit(EXIT_SQLITE);
 	}
 }
+
 
 bool serial_val::operator<(const serial_val &o) const {
 	if (s < o.s) {

@@ -151,10 +151,15 @@ void mbtiles_map_image_to_pmtiles(char *fname, metadata m, bool tile_compression
 	}
 
 	// materialize list of all tile IDs
+	//
+	// This fork stores tiles as "tiles_shallow" (z/x/y -> tile_data_id) plus "tiles_data"
+	// (tile_data_id -> blob); the upstream "map"/"images" pair is never created. Reading the
+	// upstream names here meant every PMTiles output died with "no such table: map" after
+	// doing all of the work.
 	std::vector<uint64_t> tile_ids;
 
 	{
-		const char *sql = "SELECT zoom_level, tile_column, tile_row FROM map";
+		const char *sql = "SELECT zoom_level, tile_column, tile_row FROM tiles_shallow";
 		sqlite3_stmt *stmt;
 
 		if (sqlite3_prepare_v2(db, sql, -1, &stmt, NULL) != SQLITE_OK) {
@@ -184,7 +189,7 @@ void mbtiles_map_image_to_pmtiles(char *fname, metadata m, bool tile_compression
 
 	// write tile data to tempfile in clustered order
 	{
-		const char *map_sql = "SELECT tile_id FROM map WHERE zoom_level = ? AND tile_column = ? AND tile_row = ?";
+		const char *map_sql = "SELECT tile_data_id FROM tiles_shallow WHERE zoom_level = ? AND tile_column = ? AND tile_row = ?";
 		sqlite3_stmt *map_stmt;
 
 		if (sqlite3_prepare_v2(db, map_sql, -1, &map_stmt, NULL) != SQLITE_OK) {
@@ -192,7 +197,7 @@ void mbtiles_map_image_to_pmtiles(char *fname, metadata m, bool tile_compression
 			exit(EXIT_SQLITE);
 		}
 
-		const char *image_sql = "SELECT tile_data FROM images WHERE tile_id = ?";
+		const char *image_sql = "SELECT tile_data FROM tiles_data WHERE tile_data_id = ?";
 		sqlite3_stmt *image_stmt;
 
 		if (sqlite3_prepare_v2(db, image_sql, -1, &image_stmt, NULL) != SQLITE_OK) {
@@ -220,11 +225,14 @@ void mbtiles_map_image_to_pmtiles(char *fname, metadata m, bool tile_compression
 			sqlite3_bind_int(map_stmt, 3, (1LL << zxy.z) - 1 - zxy.y);
 
 			if (sqlite3_step(map_stmt) != SQLITE_ROW) {
-				fprintf(stderr, "Corrupt mbtiles file: null entry in map table\n");
+				fprintf(stderr, "Corrupt mbtiles file: null entry in tiles_shallow table\n");
 				exit(EXIT_SQLITE);
 			}
 
-			std::string hsh{reinterpret_cast<const char *>(sqlite3_column_text(map_stmt, 0))};
+			// an integer id here, not upstream's content hash - its decimal form is still a
+			// perfectly good key for the deduplication map below
+			sqlite3_int64 tile_data_id = sqlite3_column_int64(map_stmt, 0);
+			std::string hsh = std::to_string(tile_data_id);
 
 			if (hash_to_offset_len.count(hsh) > 0) {
 				auto offset_len = hash_to_offset_len.at(hsh);
@@ -234,9 +242,9 @@ void mbtiles_map_image_to_pmtiles(char *fname, metadata m, bool tile_compression
 					entries.emplace_back(tile_id, std::get<0>(offset_len), std::get<1>(offset_len), 1);
 				}
 			} else {
-				sqlite3_bind_text(image_stmt, 1, hsh.data(), hsh.size(), SQLITE_STATIC);
+				sqlite3_bind_int64(image_stmt, 1, tile_data_id);
 				if (sqlite3_step(image_stmt) != SQLITE_ROW) {
-					fprintf(stderr, "Corrupt mbtiles file: null entry in image table\n");
+					fprintf(stderr, "Corrupt mbtiles file: null entry in tiles_data table\n");
 					exit(EXIT_SQLITE);
 				}
 
